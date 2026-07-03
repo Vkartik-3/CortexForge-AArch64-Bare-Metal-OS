@@ -37,15 +37,15 @@ rm -f "$LOG"
 FIFO="$(mktemp -u)"; mkfifo "$FIFO"
 
 # Launch QEMU with its serial on stdio: stdin from the FIFO, stdout to the log.
-# romfile= disables PCI option-ROM (PXE) loading on each virtio device. Ubuntu's
-# qemu-system-arm package ships without efi-virtio.rom, so without this QEMU
-# aborts at startup with 'failed to find romfile "efi-virtio.rom"'. We never PXE
-# boot, so suppressing the ROM entirely is the portable fix.
+# The virtio-*-pci devices load a PCI option ROM (efi-virtio.rom), shipped by
+# the qemu-system-data / ipxe-qemu packages — the workflow installs those
+# explicitly (qemu-system-arm only *recommends* them, and we build with
+# --no-install-recommends).
 timeout "$HARD_TIMEOUT" "$QEMU" \
   -machine virt,gic-version=3 -m 8G -nographic -cpu cortex-a72 -icount shift=0 \
-  -device virtio-rng-pci,disable-legacy=on,romfile= \
+  -device virtio-rng-pci,disable-legacy=on \
   -drive file="$DISK",if=none,format=raw,id=d0 \
-  -device virtio-blk-pci,drive=d0,disable-legacy=on,romfile= \
+  -device virtio-blk-pci,drive=d0,disable-legacy=on \
   -kernel "$KERNEL" < "$FIFO" > "$LOG" 2>&1 &
 QEMU_PID=$!
 

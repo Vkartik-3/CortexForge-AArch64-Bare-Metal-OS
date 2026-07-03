@@ -23,6 +23,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             gcc-aarch64-linux-gnu \
             qemu-system-arm \
+            qemu-system-data \
+            ipxe-qemu \
             mtools \
             dosfstools
           # Sanity: show the tool versions we actually got.
