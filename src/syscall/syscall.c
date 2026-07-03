@@ -11,6 +11,7 @@
 #include "mm/pmm/pmm.h"
 #include "strings/strings.h"
 #include "bench/bench.h"
+#include "signal.h"
 #include "elf.h"
 
 #include <stddef.h>
@@ -440,10 +441,32 @@ void syscall_dispatch(trap_frame_t *frame) {
   }
 
 
-  case SYS_KILL:
-    /* arg0 = pid. Returns 0 on success or -1. */
-    ret = (int64_t)sched_kill_task(arg0);
+  case SYS_KILL: {
+    /* arg0 = pid, arg1 = signum. SIGKILL (and signum 0 as a legacy
+     * "terminate" request from the old one-arg callers) terminates the task
+     * immediately via the run-queue unlink path. Any other signal sets the
+     * target's pending bit; it is delivered when that task next returns to
+     * EL0. Returns 0 on success, -1 if the pid is unknown. */
+    int signum = (int)arg1;
+    if (signum == SIGKILL) {
+      ret = (int64_t)sched_kill_task(arg0);
+      break;
+    }
+    task_t *tgt = sched_find_task(arg0);
+    if (!tgt || tgt->state == TASK_DEAD) {
+      ret = -1;
+      break;
+    }
+    if (signum == 0) {
+      ret = 0; /* existence check, no signal */
+    } else if (signum >= SIG_MIN && signum <= SIG_MAX) {
+      tgt->sig_pending |= (1u << signum);
+      ret = 0;
+    } else {
+      ret = -1;
+    }
     break;
+  }
 
   case SYS_FORK:
     /* No arguments. Returns child pid to the caller; the child task,
@@ -501,6 +524,27 @@ void syscall_dispatch(trap_frame_t *frame) {
      * No arguments; prints [BENCH] result lines to the console and returns 0. */
     bench_run();
     ret = 0;
+    break;
+
+  case SYS_SIGACTION:
+    /* arg0 = signum, arg1 = handler (EL0 addr / SIG_DFL / SIG_IGN). */
+    ret = signal_sigaction(sched_current(), (int)arg0, arg1);
+    break;
+
+  case SYS_SIGRETURN:
+    /* Restores the interrupted context from the signal frame and returns
+     * without the normal x0 writeback (which would clobber the restored x0). */
+    signal_sigreturn(frame);
+    return;
+
+  case SYS_SIGPROCMASK:
+    /* arg0 = how, arg1 = set*, arg2 = oldset*. */
+    ret = signal_sigprocmask(sched_current(), (int)arg0, arg1, arg2);
+    break;
+
+  case SYS_ALARM:
+    /* arg0 = seconds; returns previously-remaining alarm seconds. */
+    ret = signal_alarm(sched_current(), arg0);
     break;
 
   default:

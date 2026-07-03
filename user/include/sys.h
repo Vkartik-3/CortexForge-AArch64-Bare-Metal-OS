@@ -37,10 +37,30 @@ typedef unsigned char      uint8_t;
 #define SYS_FORK    12
 #define SYS_EXEC    13
 #define SYS_BALLOON 14
+#define SYS_BENCH   15
+#define SYS_SIGACTION   16
+#define SYS_SIGRETURN   17
+#define SYS_SIGPROCMASK 18
+#define SYS_ALARM       19
 
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
+
+/* Signal numbers (must match src/syscall/signal.h). */
+#define SIGHUP   1
+#define SIGINT   2
+#define SIGKILL  9
+#define SIGALRM 14
+#define SIGTERM 15
+#define SIGCHLD 17
+
+#define SIG_DFL 0
+#define SIG_IGN 1
+
+#define SIG_BLOCK   0
+#define SIG_UNBLOCK 1
+#define SIG_SETMASK 2
 
 #define STDIN_FILENO  0
 #define STDOUT_FILENO 1
@@ -120,6 +140,47 @@ static inline void sys_sleep(uint64_t ms) {
   register uint64_t x0 __asm__("x0") = ms;
   register uint64_t x8 __asm__("x8") = SYS_SLEEP;
   __asm__ __volatile__("svc #0" ::"r"(x0), "r"(x8) : "memory");
+}
+
+/* ---- Signal syscalls ----------------------------------------------------
+ * The handler runs at EL0; when it returns, its `ret` lands in the kernel-
+ * provided sigreturn trampoline (x30 is set by the kernel on delivery), so no
+ * user-side trampoline is needed. A handler value of SIG_DFL terminates the
+ * task; SIG_IGN discards the signal. */
+typedef void (*sighandler_t)(int);
+
+static inline int sys_sigaction(int signum, sighandler_t handler) {
+  register long      x0 __asm__("x0") = signum;
+  register void     *x1 __asm__("x1") = (void *)handler;
+  register uint64_t  x8 __asm__("x8") = SYS_SIGACTION;
+  __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x1), "r"(x8) : "memory");
+  return (int)x0;
+}
+
+static inline unsigned sys_alarm(unsigned seconds) {
+  register long      x0 __asm__("x0") = (long)seconds;
+  register uint64_t  x8 __asm__("x8") = SYS_ALARM;
+  __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x8) : "memory");
+  return (unsigned)x0;
+}
+
+static inline int sys_sigprocmask(int how, const uint32_t *set,
+                                  uint32_t *oldset) {
+  register long          x0 __asm__("x0") = how;
+  register const uint32_t *x1 __asm__("x1") = set;
+  register uint32_t      *x2 __asm__("x2") = oldset;
+  register uint64_t       x8 __asm__("x8") = SYS_SIGPROCMASK;
+  __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x8)
+                       : "memory");
+  return (int)x0;
+}
+
+static inline int sys_kill(int pid, int sig) {
+  register long      x0 __asm__("x0") = pid;
+  register long      x1 __asm__("x1") = sig;
+  register uint64_t  x8 __asm__("x8") = SYS_KILL;
+  __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x1), "r"(x8) : "memory");
+  return (int)x0;
 }
 
 /* Convenience helpers: not syscalls themselves, just small inlines that

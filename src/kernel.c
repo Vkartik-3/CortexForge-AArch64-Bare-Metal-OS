@@ -510,9 +510,13 @@ static void task_shell(void) {
 
     } else if (u_starts_with(line, "kill ")) {
       int pid = u_atou(line + 5);
+      /* Shell kill sends SIGKILL (9) so the task terminates immediately,
+       * preserving the original "terminate by pid" semantics now that
+       * SYS_KILL takes a signal number in x1. */
       register int64_t x0 __asm__("x0") = (int64_t)pid;
+      register uint64_t x1 __asm__("x1") = 9; /* SIGKILL */
       register uint64_t x8 __asm__("x8") = 11; /* SYS_KILL */
-      __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x8) : "memory");
+      __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x1), "r"(x8) : "memory");
       if (x0 == 0) {
         sh_print("killed.\n");
       } else {
@@ -594,6 +598,27 @@ static void task_shell(void) {
        * which is not enabled at EL0, so this traps into the kernel via
        * SYS_BENCH; all [BENCH] output is printed from EL1. */
       sys_bench();
+    } else if (u_starts_with(line, "./")) {
+      /* Convenience launcher: "./name" -> exec "/mnt/fat32/NAME.ELF" (the
+       * FAT32 volume is mounted there and stores user binaries upper-cased).
+       * Replaces this shell task on success. */
+      const char *name = line + 2;
+      char path[80];
+      int p = 0;
+      const char *dir = "/mnt/fat32/";
+      for (int i = 0; dir[i]; i++) path[p++] = dir[i];
+      for (int i = 0; name[i] && p < 74; i++) {
+        char c = name[i];
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        path[p++] = c;
+      }
+      const char *ext = ".ELF";
+      for (int i = 0; i < 4 && p < 79; i++) path[p++] = ext[i];
+      path[p] = '\0';
+      const char *argv[2] = {line, 0};
+      if (sys_exec(path, argv) < 0) {
+        sh_print("exec: failed (no such program?)\n");
+      }
     } else if (u_streq(line, "exit")) {
       sh_print("bye!\n");
       sys_exit();

@@ -93,6 +93,14 @@ static inline int pte_valid(uint64_t entry) { return entry & PTE_VALID; }
 #define USER_STACK_TOP 0x00800000ULL // 8 MB — top of user stack
 #define USER_STACK_PAGES 4           // 16 KiB user stack
 
+// Signal-return trampoline page (VDSO-style). One shared, read-only, EL0-
+// executable page holding `mov x8, #SYS_SIGRETURN; svc #0`, mapped by
+// mmu_create_user_tables() into every user address space at this fixed VA.
+// The kernel points x30 (the handler's return address) here so a signal
+// handler's `ret` traps straight into SYS_SIGRETURN. Placed at 3 MB — below
+// USER_TEXT_BASE, above the NULL guard, and clear of the stack.
+#define USER_SIGTRAMP_VA 0x00300000ULL
+
 uint64_t *mmu_init(void);
 // empty TTBR0 page table for user task
 uint64_t *mmu_create_user_tables(void);

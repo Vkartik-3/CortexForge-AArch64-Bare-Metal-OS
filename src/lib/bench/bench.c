@@ -4,6 +4,9 @@
 #include "timer/timer.h"
 #include "uart/uart.h"
 #include "syscall/syscall.h"
+#include "syscall/signal.h"
+#include "mm/mmu/mmu.h"       /* USER_STACK_TOP, USER_TEXT_BASE, USER_SIGTRAMP_VA */
+#include "strings/strings.h"  // IWYU pragma: keep
 
 /* ---------------------------------------------------------------------------
  * bench.c — cycle-level latency microbenchmarks on the ARM PMU.
@@ -215,6 +218,82 @@ static void bench_irq(void) {
   bench_report("irq_latency     ", bench_compute(g_irq_samples, BENCH_ITERS));
 }
 
+/* ---- 4 & 5. signal delivery / sigreturn ---------------------------------
+ * Kernel-internal microbenchmarks (no full EL0 round trip). We drive the real
+ * signal machinery on a synthetic 688-byte trap frame with SP_EL0 pointed at
+ * unused scratch space inside the current (shell) task's mapped user stack, so
+ * the frame writes land in genuinely-mapped memory without disturbing the live
+ * stack. The current task's signal state is saved and restored around the run.
+ *
+ * signal_delivery: cycles for signal_check_and_deliver() to build the signal
+ * frame and retarget the trap frame at the handler (sig_pending set -> ready to
+ * eret into the handler's first instruction).
+ * sigreturn_latency: cycles for signal_sigreturn() to restore the interrupted
+ * context from the signal frame. */
+
+/* Full-size backing store for a synthetic trap frame (688 bytes -> 86 u64;
+ * padded). SP_EL0 lives at index 35, past the 280-byte C struct, so a real
+ * 688-byte buffer is required. */
+static uint64_t g_fakeframe[88];
+
+#define BENCH_SIG_NO      10                        /* arbitrary catchable sig */
+#define BENCH_SCRATCH_SP  (USER_STACK_TOP - 0x1000) /* 4 KiB below stack top */
+
+static void bench_signal(void) {
+  task_t *cur = sched_current();
+  /* Save + neutralize the caller's real signal state. */
+  uint32_t save_pending = cur->sig_pending;
+  uint32_t save_blocked = cur->sig_blocked;
+  uint64_t save_hnd     = cur->sig_handlers[BENCH_SIG_NO];
+  cur->sig_blocked                 = 0;
+  cur->sig_handlers[BENCH_SIG_NO]  = USER_TEXT_BASE; /* a real (mapped) handler */
+
+  trap_frame_t *tf = (trap_frame_t *)g_fakeframe;
+
+  /* --- signal_delivery --- */
+  for (uint32_t i = 0; i < BENCH_ITERS; i++) {
+    memset(g_fakeframe, 0, sizeof(g_fakeframe));
+    tf->spsr = 0;                              /* EL0 return */
+    tf->elr  = USER_TEXT_BASE;
+    ((uint64_t *)tf)[35] = BENCH_SCRATCH_SP;   /* SP_EL0 */
+    cur->sig_pending = (1u << BENCH_SIG_NO);
+
+    uint64_t t0 = cpu_read_cycles();
+    signal_check_and_deliver(cur, tf);
+    uint64_t t1 = cpu_read_cycles();
+    g_samples[i] = t1 - t0;
+  }
+  bench_report("signal_delivery ", bench_compute(g_samples, BENCH_ITERS));
+
+  /* --- sigreturn_latency --- Build one valid signal frame in scratch memory,
+   * then time signal_sigreturn() restoring from it repeatedly (it only reads
+   * the frame, so one setup suffices). */
+  sigframe_t *sf = (sigframe_t *)BENCH_SCRATCH_SP;
+  for (int j = 0; j < 31; j++) {
+    sf->regs[j] = (uint64_t)j;
+  }
+  sf->sp_el0     = USER_STACK_TOP - 0x800;
+  sf->elr        = USER_TEXT_BASE + 0x40;
+  sf->spsr       = 0;
+  sf->trampoline = USER_SIGTRAMP_VA;
+
+  for (uint32_t i = 0; i < BENCH_ITERS; i++) {
+    memset(g_fakeframe, 0, sizeof(g_fakeframe));
+    ((uint64_t *)tf)[35] = BENCH_SCRATCH_SP;   /* SP_EL0 -> signal frame */
+
+    uint64_t t0 = cpu_read_cycles();
+    signal_sigreturn(tf);
+    uint64_t t1 = cpu_read_cycles();
+    g_samples[i] = t1 - t0;
+  }
+  bench_report("sigreturn_latency", bench_compute(g_samples, BENCH_ITERS));
+
+  /* Restore the caller's real signal state. */
+  cur->sig_pending                = save_pending;
+  cur->sig_blocked                = save_blocked;
+  cur->sig_handlers[BENCH_SIG_NO] = save_hnd;
+}
+
 /* ---- entry --------------------------------------------------------------- */
 void bench_run(void) {
   uart_printf("[BENCH] PMU harness: %u iterations/benchmark, "
@@ -226,6 +305,7 @@ void bench_run(void) {
   bench_syscall();
   bench_ctxsw();
   bench_irq();
+  bench_signal();
 
   uart_printf("[BENCH] done\n");
 }

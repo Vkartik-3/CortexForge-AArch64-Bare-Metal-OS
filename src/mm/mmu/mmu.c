@@ -195,10 +195,55 @@ static uint64_t *walk_levels(uint64_t *l0_table, uint64_t va, int target_level,
                              int alloc);
 
 
+/* Lazily-built shared signal-return trampoline page (see USER_SIGTRAMP_VA).
+ * One physical page, allocated on first use, holding two instructions:
+ *   mov x8, #17   ; SYS_SIGRETURN   (encoding 0xD2800228)
+ *   svc #0                          (encoding 0xD4000001)
+ * Mapped read-only + EL0-executable into every user address space so a signal
+ * handler returning via x30 lands here and traps into the kernel. */
+static uintptr_t g_sigtramp_phys = 0;
+
+static uintptr_t mmu_sigtramp_page(void) {
+  if (g_sigtramp_phys) {
+    return g_sigtramp_phys;
+  }
+  uintptr_t p = pmm_allocate_page();
+  if (!p) {
+    return 0;
+  }
+  uint32_t *code = (uint32_t *)PHYS_TO_VIRT(p);
+  memset(code, 0, PAGE_SIZE);
+  code[0] = 0xD2800228; /* mov x8, #17 (SYS_SIGRETURN) */
+  code[1] = 0xD4000001; /* svc #0 */
+  /* Make the freshly-written instructions visible to the instruction side:
+   * clean D-cache to PoU, then invalidate I-cache by the same VA. A no-op
+   * under QEMU/TCG (no separate caches modelled) but correct on real HW. */
+  uintptr_t va = (uintptr_t)code;
+  __asm__ __volatile__("dc cvau, %0\n\t"
+                       "dsb ish\n\t"
+                       "ic ivau, %0\n\t"
+                       "dsb ish\n\t"
+                       "isb"
+                       :: "r"(va) : "memory");
+  g_sigtramp_phys = p;
+  return p;
+}
+
 uint64_t *mmu_create_user_tables(void) {
-  // Just an empty L0 (physical address) — walk_levels() will populate
-  // L1/L2/L3 tables on demand when mmu_map_user_range() is called.
-  return alloc_table();
+  // An L0 (physical address) — walk_levels() populates L1/L2/L3 tables on
+  // demand when mmu_map_user_range() is called.
+  uint64_t *l0 = alloc_table();
+  if (!l0) {
+    return 0;
+  }
+  // Inject the shared sigreturn trampoline at USER_SIGTRAMP_VA: EL0 read +
+  // execute (AP=11, UXN cleared), kernel no-execute (PXN).
+  uintptr_t tramp = mmu_sigtramp_page();
+  if (tramp) {
+    uint64_t flags = PTE_ATTRIDX(1) | PTE_AP_RO_EL0 | PTE_PXN;
+    mmu_map_user_range(l0, USER_SIGTRAMP_VA, tramp, 1, flags);
+  }
+  return l0;
 }
 
 void mmu_map_user_range(uint64_t *l0, uint64_t va, uint64_t pa,

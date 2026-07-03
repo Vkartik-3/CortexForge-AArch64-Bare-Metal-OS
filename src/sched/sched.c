@@ -541,6 +541,18 @@ void task_exit(void) {
   schedule();
 }
 
+task_t *sched_find_task(uint64_t pid) {
+  task_t *head = sched_first_task();
+  task_t *t    = head;
+  do {
+    if (t->pid == pid) {
+      return t;
+    }
+    t = t->next;
+  } while (t != head);
+  return (void *)0;
+}
+
 int sched_kill_task(uint64_t pid) {
   /* Refuse to kill the idle task — the scheduler relies on it as a
    * fallback when nothing else is runnable. */

@@ -53,6 +53,19 @@ typedef struct task {
    * by switch.S stays put. */
   uintptr_t stack_grown_phys[USER_STACK_GROWN_MAX];
   uint16_t  stack_grown_count;
+
+  /* ---- POSIX signal state (Extension 3) --------------------------------
+   * Appended at the very END of task_t so the switch.S-hard-coded
+   * TASK_TTBR0 = 40 offset (and every other assembly offset) is unaffected.
+   * sig_handlers[N] holds the EL0 handler address for signal N, or the
+   * sentinels SIG_DFL (0 = terminate) / SIG_IGN (1 = ignore). sig_pending
+   * and sig_blocked are bitmasks indexed by signal number (bit N = signal
+   * N; bit 0 unused). sig_alarm_ticks is a per-task SIGALRM countdown in
+   * timer ticks (0 = disarmed), decremented once per timer IRQ. */
+  uint64_t sig_handlers[32];
+  uint32_t sig_pending;
+  uint32_t sig_blocked;
+  uint64_t sig_alarm_ticks;
 } task_t;
 
 // switch.S
@@ -86,6 +99,11 @@ void task_exit(void);
  * caller, falls through to task_exit(). Returns 0 on success, -1 if the
  * pid is not found, already dead, or refers to the idle task (pid 0). */
 int sched_kill_task(uint64_t pid);
+
+/* Look up a task by pid without altering the run queue. Returns NULL if no
+ * such task exists. Used by the signal path (SYS_KILL) to set a pending
+ * signal bit on the target. */
+task_t *sched_find_task(uint64_t pid);
 void sleep_ms(uint64_t ms);
 void sched_wake_sleepers(void);
 void sched_reap(void);

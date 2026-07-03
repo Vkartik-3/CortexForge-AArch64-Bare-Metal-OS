@@ -2,6 +2,7 @@
 #include "bench/bench.h"
 #include "gic/gic.h"
 #include "sched/sched.h"
+#include "signal.h"
 #include "uart/uart.h"
 
 // All four are read/written from IRQ context as well as task context, so
@@ -78,6 +79,10 @@ void timer_handle_irq() {
 
   // Wake any tasks whose sleep deadline has passed
   sched_wake_sleepers();
+
+  // Decrement per-task SIGALRM countdowns; expiry sets SIGALRM pending, which
+  // is delivered when the target task next returns to EL0.
+  signal_tick_alarms();
 
   if (tick_callback) {
     tick_callback();

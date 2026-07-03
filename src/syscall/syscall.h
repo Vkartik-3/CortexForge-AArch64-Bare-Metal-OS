@@ -21,6 +21,10 @@
 #define SYS_EXEC 13      /* arg0 = path to flat user binary; replaces caller image */
 #define SYS_BALLOON 14   /* arg0 = op (0=inflate,1=deflate,2=actual,3=target), arg1 = n */
 #define SYS_BENCH 15     /* runs the EL1 PMU benchmark harness; returns 0 */
+#define SYS_SIGACTION   16 /* arg0 = signum, arg1 = handler addr; returns 0/-1 */
+#define SYS_SIGRETURN   17 /* no args; restores context from the signal frame */
+#define SYS_SIGPROCMASK 18 /* arg0 = how, arg1 = set*, arg2 = oldset*; returns 0/-1 */
+#define SYS_ALARM       19 /* arg0 = seconds; returns previous alarm seconds */
 
 /* SYS_BALLOON sub-operations. Inflate/deflate hand pages to/from the host
  * via virtio-balloon; status returns the current size (op=2) or the host's

@@ -1,5 +1,6 @@
 #include "exception.h"
 #include "bench/bench.h"
+#include "signal.h"
 #include "gic/gic.h"
 #include "mm/mmu/mmu.h"
 #include "panic/panic.h"
@@ -283,6 +284,12 @@ void exception_dispatch(uint64_t type, trap_frame_t *frame) {
     kernel_panic("Unknown exception type");
     break;
   }
+
+  /* Signal delivery point: just before the vector epilogue eret's. Only fires
+   * when this frame returns to EL0 (checked inside); EL1 tasks and the syscall
+   * paths that never reach here (panic / task_exit) are unaffected. Delivers at
+   * most one handler per return to EL0. */
+  signal_check_and_deliver(sched_current(), frame);
 }
 
 void exceptions_init(void) {
