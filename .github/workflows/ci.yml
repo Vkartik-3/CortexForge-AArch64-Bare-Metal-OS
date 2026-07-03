@@ -37,7 +37,7 @@ jobs:
       - name: Build FAT32 disk image
         run: make disk       # -> build/disk.img
 
-      - name: Boot headless QEMU + assert boot marker + run PMU benchmark
+      - name: Boot QEMU — assert marker, run PMU benchmark + UART framing test
         run: ./scripts/ci-boot-bench.sh
 
       - name: Upload benchmark results
@@ -48,10 +48,20 @@ jobs:
           path: bench/results.txt
           if-no-files-found: warn
 
-      - name: Upload serial log (debug)
+      - name: Upload UART framing results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: serial-log
-          path: build/serial.log
+          name: uart-results
+          path: bench/uart-results.txt
+          if-no-files-found: warn
+
+      - name: Upload serial logs (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serial-logs
+          path: |
+            build/serial.log
+            build/serial-uart.log
           if-no-files-found: warn

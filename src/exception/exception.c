@@ -254,6 +254,8 @@ void exception_dispatch(uint64_t type, trap_frame_t *frame) {
 
     if (intid == TIMER_PPI_INTID) {
       timer_handle_irq();
+    } else if (intid == UART1_INTID) {
+      uart1_rx_isr();
     } else {
       uart_printf("[IRQ] INTID %d (not implemented)\n", (uint64_t)intid);
     }

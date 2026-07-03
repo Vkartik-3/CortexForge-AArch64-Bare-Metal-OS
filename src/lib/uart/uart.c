@@ -64,6 +64,87 @@ void uart_errorln(const char *err) {
   uart_putc('\n');
 }
 
+/* ===========================================================================
+ * UART1 (@ 0x09040000) — interrupt-driven RX for the framing layer.
+ * PL011 register offsets are the same as UART0; only the base differs.
+ * ========================================================================= */
+#define UART1_BASE 0x09040000UL
+#define UART1_DR   (UART1_BASE + 0x00)
+#define UART1_FR   (UART1_BASE + 0x18)
+#define UART1_IBRD (UART1_BASE + 0x24)
+#define UART1_FBRD (UART1_BASE + 0x28)
+#define UART1_LCRH (UART1_BASE + 0x2C)
+#define UART1_CR   (UART1_BASE + 0x30)
+#define UART1_IMSC (UART1_BASE + 0x38)
+#define UART1_ICR  (UART1_BASE + 0x44)
+
+#define UART_FR_RXFE (1U << 4) /* RX FIFO empty */
+#define UART_FR_TXFF (1U << 5) /* TX FIFO full  */
+#define UART_INT_RX  (1U << 4) /* RXIM / RXIC / RXMIS — receive interrupt */
+
+/* 256-byte RX ring. Single producer (uart1_rx_isr in IRQ context), single
+ * consumer (uart1_getc_nonblock in task context, which masks IRQs). */
+#define UART1_RING_SZ 256
+static volatile uint8_t  u1_ring[UART1_RING_SZ];
+static volatile uint32_t u1_head; /* write index (ISR)      */
+static volatile uint32_t u1_tail; /* read index  (consumer) */
+
+void uart1_init(void) {
+  mmio_write32(UART1_CR, 0x00000000);      /* disable while configuring   */
+  mmio_write32(UART1_ICR, 0x7FF);          /* clear all pending interrupts */
+  mmio_write32(UART1_IBRD, 13);            /* same 115200 baud as UART0    */
+  mmio_write32(UART1_FBRD, 2);
+  mmio_write32(UART1_LCRH, (1 << 4) | (1 << 5) | (1 << 6)); /* FIFO, 8N1   */
+  mmio_write32(UART1_IMSC, UART_INT_RX);   /* unmask RX interrupt (RXIM)    */
+  mmio_write32(UART1_CR, (1 << 0) | (1 << 8) | (1 << 9));   /* UART|TXE|RXE */
+  u1_head = 0;
+  u1_tail = 0;
+  uart_println("[UART1] Framing UART @0x09040000 initialized (RX IRQ on)");
+}
+
+void uart1_putc(uint8_t c) {
+  while (mmio_read32(UART1_FR) & UART_FR_TXFF) {
+  }
+  mmio_write32(UART1_DR, c);
+}
+
+void uart1_rx_isr(void) {
+  /* Drain the RX FIFO into the ring. Runs in IRQ context, so it is atomic
+   * with respect to the consumer (which masks IRQs). */
+  while (!(mmio_read32(UART1_FR) & UART_FR_RXFE)) {
+    uint8_t b = (uint8_t)mmio_read32(UART1_DR);
+    uint32_t next = (u1_head + 1) % UART1_RING_SZ;
+    if (next != u1_tail) {
+      u1_ring[u1_head] = b;
+      u1_head = next;
+    }
+    /* else: ring full — drop the byte (framing CRC will catch the loss). */
+  }
+  mmio_write32(UART1_ICR, UART_INT_RX); /* clear the RX interrupt */
+}
+
+int uart1_getc_nonblock(void) {
+  int ret = -1;
+  uint64_t daif;
+  __asm__ __volatile__("mrs %0, daif" : "=r"(daif));
+  __asm__ __volatile__("msr daifset, #2"); /* mask IRQ: no ISR races tail */
+  if (u1_tail != u1_head) {
+    ret = (int)u1_ring[u1_tail];
+    u1_tail = (u1_tail + 1) % UART1_RING_SZ;
+  }
+  __asm__ __volatile__("msr daif, %0" ::"r"(daif));
+  return ret;
+}
+
+int uart1_rx_available(void) {
+  uint64_t daif;
+  __asm__ __volatile__("mrs %0, daif" : "=r"(daif));
+  __asm__ __volatile__("msr daifset, #2");
+  uint32_t h = u1_head, t = u1_tail;
+  __asm__ __volatile__("msr daif, %0" ::"r"(daif));
+  return (int)((h - t) % UART1_RING_SZ);
+}
+
 void uart_puthex(uint64_t value) {
   uart_puts("0x");
   int started = 0;

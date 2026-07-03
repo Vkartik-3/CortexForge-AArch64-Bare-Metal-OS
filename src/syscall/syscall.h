@@ -25,6 +25,7 @@
 #define SYS_SIGRETURN   17 /* no args; restores context from the signal frame */
 #define SYS_SIGPROCMASK 18 /* arg0 = how, arg1 = set*, arg2 = oldset*; returns 0/-1 */
 #define SYS_ALARM       19 /* arg0 = seconds; returns previous alarm seconds */
+#define SYS_IOCTL       20 /* arg0 = fd, arg1 = cmd, arg2 = arg; device-defined */
 
 /* SYS_BALLOON sub-operations. Inflate/deflate hand pages to/from the host
  * via virtio-balloon; status returns the current size (op=2) or the host's

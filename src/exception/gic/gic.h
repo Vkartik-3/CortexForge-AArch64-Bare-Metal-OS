@@ -8,6 +8,9 @@
 
 #define GICD_CTLR (GICD_BASE + 0x0000)
 #define GICD_ISENABLER (GICD_BASE + 0x0100)
+#define GICD_IGROUPR (GICD_BASE + 0x0080)   /* 1 bit/INTID: 1 = Group 1     */
+#define GICD_IGRPMODR (GICD_BASE + 0x0D00)  /* 1 bit/INTID: 0 = Non-secure  */
+#define GICD_IROUTER (GICD_BASE + 0x6000)   /* 64 bits/INTID (SPIs, ARE on) */
 
 #define GICD_CTLR_ENABLE_G1NS (1U << 1)
 #define GICD_CTLR_ARE_NS (1U << 4)

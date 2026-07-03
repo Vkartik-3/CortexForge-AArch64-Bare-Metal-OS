@@ -547,6 +547,14 @@ void syscall_dispatch(trap_frame_t *frame) {
     ret = signal_alarm(sched_current(), arg0);
     break;
 
+  case SYS_IOCTL:
+    /* arg0 = fd, arg1 = cmd, arg2 = arg (value or user pointer; the device
+     * ioctl handler is responsible for validating pointer args). */
+    if (fds) {
+      ret = fd_ioctl(fds, (int)arg0, arg1, arg2);
+    }
+    break;
+
   default:
     uart_printf("[SYSCALL] Unknown syscall %u\n", num);
     ret = -1;

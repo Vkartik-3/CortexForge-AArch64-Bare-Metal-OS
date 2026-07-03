@@ -36,6 +36,9 @@ typedef struct file_operations {
   int (*read)(struct vnode *node, struct file *f, void *buf, size_t count);
   int (*write)(struct vnode *node, struct file *f, const void *buf,
                size_t count);
+  /* Optional device-control entry point (NULL for devices that don't need
+   * it). cmd/arg are driver-defined; arg is typically a user pointer. */
+  int (*ioctl)(struct vnode *node, struct file *f, uint64_t cmd, uint64_t arg);
 } file_operations_t;
 
 /*
@@ -94,5 +97,6 @@ int fd_read(fd_table_t *t, int fd, void *buf, size_t count);
 int fd_write(fd_table_t *t, int fd, const void *buf, size_t count);
 int fd_close(fd_table_t *t, int fd);
 int64_t fd_seek(fd_table_t *t, int fd, int64_t offset, int whence);
+int fd_ioctl(fd_table_t *t, int fd, uint64_t cmd, uint64_t arg);
 
 #endif

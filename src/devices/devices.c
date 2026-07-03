@@ -3,8 +3,11 @@
 #include "rng/rng.h"
 #include "console/console.h"
 #include "uart/uart.h"
+#include "uart/framing.h"
 #include "utils/utils.h"
 #include "vfs/vfs.h"
+#include "strings/strings.h" // IWYU pragma: keep
+#include "mm/mmu/mmu.h"       // USER_STACK_TOP (ioctl pointer range check)
 
 #define SECTOR 512
 
@@ -177,6 +180,73 @@ static file_operations_t vcons_ops = {
 };
 
 
+/* ---- /dev/uart0 ---- reliable framing protocol over the secondary UART.
+ * read()  blocks for one DATA frame, ACKs it, and returns the payload.
+ * write() sends the buffer as a DATA frame with an auto-incrementing seq and
+ *         waits for the peer's ACK (retransmitting on timeout/NACK).
+ * On a CRC error the reader sends a NACK so the peer retransmits.
+ * NOTE: /dev/uart0 lives on UART1 (0x09040000), physically separate from
+ * /dev/console on UART0, so framed bytes never mix with console output. */
+static uint8_t g_uart0_tx_seq = 0;
+
+static int uart0_read(vnode_t *n, file_t *f, void *buf, size_t count) {
+  (void)n;
+  (void)f;
+  frame_t fr;
+  int r = framing_recv(&fr, framing_get_timeout());
+  if (r == FRAMING_OK && fr.type == FRAME_TYPE_DATA) {
+    framing_send_ack(fr.seq);
+    uint16_t n2 = fr.len;
+    if (n2 > count) n2 = (uint16_t)count;
+    memcpy(buf, fr.payload, n2);
+    return (int)n2;
+  }
+  if (r == FRAMING_ERR_CRC) {
+    framing_send_nack(fr.seq); /* ask the peer to retransmit */
+    return -1;
+  }
+  return -1; /* timeout or unexpected control frame */
+}
+
+static int uart0_write(vnode_t *n, file_t *f, const void *buf, size_t count) {
+  (void)n;
+  (void)f;
+  uint16_t len = (count > FRAMING_MAX_PAYLOAD) ? FRAMING_MAX_PAYLOAD
+                                               : (uint16_t)count;
+  int r = framing_send_reliable(g_uart0_tx_seq, buf, len);
+  g_uart0_tx_seq++; /* auto-increment per frame (wraps at 256) */
+  return (r == FRAMING_OK) ? (int)len : -1;
+}
+
+static int uart0_ioctl(vnode_t *n, file_t *f, uint64_t cmd, uint64_t arg) {
+  (void)n;
+  (void)f;
+  switch (cmd) {
+  case UART_IOCTL_SET_TIMEOUT:
+    framing_set_timeout(arg);
+    return 0;
+  case UART_IOCTL_GET_STATS: {
+    /* arg is a user pointer to a framing_stats_t; range-check it. */
+    if (arg == 0 || arg + sizeof(framing_stats_t) > USER_STACK_TOP ||
+        arg + sizeof(framing_stats_t) < arg) {
+      return -1;
+    }
+    framing_stats_t st;
+    framing_get_stats(&st);
+    memcpy((void *)arg, &st, sizeof(st));
+    return 0;
+  }
+  default:
+    return -1;
+  }
+}
+
+static file_operations_t uart0_ops = {
+    .read = uart0_read,
+    .write = uart0_write,
+    .ioctl = uart0_ioctl,
+};
+
 /* ---- Entry point ---- */
 void devices_register(void) {
   vfs_register_chardev("console", &console_ops);
@@ -184,5 +254,6 @@ void devices_register(void) {
   vfs_register_chardev("zero", &zero_ops);
   vfs_register_chardev("rng", &rng_ops);
   vfs_register_chardev("vcons", &vcons_ops);
+  vfs_register_chardev("uart0", &uart0_ops);
   vfs_register_blockdev("blk", &blk_ops);
 }

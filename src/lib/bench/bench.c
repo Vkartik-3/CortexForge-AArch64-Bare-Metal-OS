@@ -5,6 +5,7 @@
 #include "uart/uart.h"
 #include "syscall/syscall.h"
 #include "syscall/signal.h"
+#include "uart/framing.h"
 #include "mm/mmu/mmu.h"       /* USER_STACK_TOP, USER_TEXT_BASE, USER_SIGTRAMP_VA */
 #include "strings/strings.h"  // IWYU pragma: keep
 
@@ -294,6 +295,47 @@ static void bench_signal(void) {
   cur->sig_handlers[BENCH_SIG_NO] = save_hnd;
 }
 
+/* ---- 6. UART framing / CRC ---------------------------------------------
+ * Pure-computation benchmarks (no UART TX): frame encode = build + CRC-16 +
+ * byte-stuffing into a buffer; crc16 over 64 and 256 bytes. */
+static uint8_t g_framebuf[FRAMING_MAX_ENCODED];
+static uint8_t g_crcbuf[256];
+
+static void bench_uart(void) {
+  for (uint32_t i = 0; i < 256; i++) {
+    g_crcbuf[i] = (uint8_t)i;
+  }
+
+  /* uart_frame_encode: DATA frame with a 64-byte payload. */
+  for (uint32_t i = 0; i < BENCH_ITERS; i++) {
+    uint64_t t0 = cpu_read_cycles();
+    framing_encode(g_framebuf, FRAME_TYPE_DATA, (uint8_t)i, g_crcbuf, 64);
+    uint64_t t1 = cpu_read_cycles();
+    g_samples[i] = t1 - t0;
+  }
+  bench_report("uart_frame_encode", bench_compute(g_samples, BENCH_ITERS));
+
+  /* crc16 over 64 bytes. */
+  for (uint32_t i = 0; i < BENCH_ITERS; i++) {
+    uint64_t t0 = cpu_read_cycles();
+    volatile uint16_t c = crc16_ccitt(g_crcbuf, 64);
+    uint64_t t1 = cpu_read_cycles();
+    (void)c;
+    g_samples[i] = t1 - t0;
+  }
+  bench_report("crc16_64b        ", bench_compute(g_samples, BENCH_ITERS));
+
+  /* crc16 over 256 bytes. */
+  for (uint32_t i = 0; i < BENCH_ITERS; i++) {
+    uint64_t t0 = cpu_read_cycles();
+    volatile uint16_t c = crc16_ccitt(g_crcbuf, 256);
+    uint64_t t1 = cpu_read_cycles();
+    (void)c;
+    g_samples[i] = t1 - t0;
+  }
+  bench_report("crc16_256b       ", bench_compute(g_samples, BENCH_ITERS));
+}
+
 /* ---- entry --------------------------------------------------------------- */
 void bench_run(void) {
   uart_printf("[BENCH] PMU harness: %u iterations/benchmark, "
@@ -306,6 +348,7 @@ void bench_run(void) {
   bench_ctxsw();
   bench_irq();
   bench_signal();
+  bench_uart();
 
   uart_printf("[BENCH] done\n");
 }

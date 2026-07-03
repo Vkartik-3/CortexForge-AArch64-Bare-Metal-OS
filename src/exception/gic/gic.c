@@ -66,9 +66,23 @@ void gic_enable_irq(uint32_t intid) {
     val |= (1U << intid);
     mmio_write32(GICR_ISENABLER0, val);
   } else {
-    // SPI: Distributor ISENABLER[n]
+    // SPI: with ARE_NS enabled we must (1) mark the INTID Group-1 Non-secure
+    // so it is delivered as an IRQ (QEMU resets IGROUPR to Group 0 = secure/
+    // FIQ, which never reaches our IRQ handler), (2) route it to this PE's
+    // affinity, and (3) enable it in the Distributor.
+    uint32_t grp_reg  = GICD_IGROUPR  + (intid / 32) * 4;
+    uint32_t mod_reg  = GICD_IGRPMODR + (intid / 32) * 4;
+    uint32_t bit      = intid % 32;
+    mmio_write32(grp_reg, mmio_read32(grp_reg) | (1U << bit));   // Group 1
+    mmio_write32(mod_reg, mmio_read32(mod_reg) & ~(1U << bit));  // Non-secure
+
+    // IROUTER<n> is 64-bit at GICD + 0x6000 + 8*intid; 0 = affinity 0.0.0.0
+    // (our single boot CPU). Write both words explicitly.
+    uint64_t rt_reg = (uint64_t)GICD_IROUTER + (uint64_t)intid * 8;
+    mmio_write32((uintptr_t)rt_reg, 0);
+    mmio_write32((uintptr_t)(rt_reg + 4), 0);
+
     uint32_t reg = GICD_ISENABLER + (intid / 32) * 4;
-    uint32_t bit = intid % 32;
     uint32_t val = mmio_read32(reg);
     val |= (1U << bit);
     mmio_write32(reg, val);

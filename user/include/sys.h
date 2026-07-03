@@ -42,6 +42,19 @@ typedef unsigned char      uint8_t;
 #define SYS_SIGRETURN   17
 #define SYS_SIGPROCMASK 18
 #define SYS_ALARM       19
+#define SYS_IOCTL       20
+
+/* /dev/uart0 ioctl commands (mirror src/lib/uart/framing.h). */
+#define UART_IOCTL_SET_TIMEOUT 0x01
+#define UART_IOCTL_GET_STATS   0x02
+
+/* Mirror of kernel framing_stats_t (src/lib/uart/framing.h). */
+typedef struct {
+  uint32_t frames_sent;
+  uint32_t frames_recv;
+  uint32_t retransmits;
+  uint32_t crc_errors;
+} framing_stats_t;
 
 #define SEEK_SET 0
 #define SEEK_CUR 1
@@ -180,6 +193,16 @@ static inline int sys_kill(int pid, int sig) {
   register long      x1 __asm__("x1") = sig;
   register uint64_t  x8 __asm__("x8") = SYS_KILL;
   __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x1), "r"(x8) : "memory");
+  return (int)x0;
+}
+
+static inline int sys_ioctl(int fd, uint64_t cmd, uint64_t arg) {
+  register long      x0 __asm__("x0") = fd;
+  register uint64_t  x1 __asm__("x1") = cmd;
+  register uint64_t  x2 __asm__("x2") = arg;
+  register uint64_t  x8 __asm__("x8") = SYS_IOCTL;
+  __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x8)
+                       : "memory");
   return (int)x0;
 }
 

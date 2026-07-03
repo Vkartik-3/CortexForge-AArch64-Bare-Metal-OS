@@ -239,6 +239,17 @@ int fd_write(fd_table_t *t, int fd, const void *buf, size_t count) {
   return f->vnode->ops->write(f->vnode, f, buf, count);
 }
 
+int fd_ioctl(fd_table_t *t, int fd, uint64_t cmd, uint64_t arg) {
+  if (fd < 0 || fd >= MAX_FDS || !t->fds[fd]) {
+    return -1;
+  }
+  file_t *f = t->fds[fd];
+  if (!f->vnode->ops || !f->vnode->ops->ioctl) {
+    return -1;
+  }
+  return f->vnode->ops->ioctl(f->vnode, f, cmd, arg);
+}
+
 int fd_close(fd_table_t *t, int fd) {
   if (fd < 0 || fd >= MAX_FDS || !t->fds[fd]) {
     return -1;

@@ -829,6 +829,11 @@ void kernel_main() {
 
   gic_init();
 
+  /* Secondary UART (UART1 @ 0x09040000) for the reliable framing protocol.
+   * Interrupt-driven RX (INTID 40); kept separate from the console UART. */
+  uart1_init();
+  gic_enable_irq(UART1_INTID);
+
   pci_enumerate_bus();
   pci_virtio_rng_init();
   pci_virtio_blk_init();
