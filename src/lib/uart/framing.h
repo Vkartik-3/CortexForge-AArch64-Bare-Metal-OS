@@ -64,8 +64,32 @@ void framing_init(void);
 
 /* Lazily bring up the UART1 hardware (uart1_init + enable INTID 40) on first
  * use. Idempotent. Called from the /dev/uart0 ops so a boot / benchmark run
- * with no second serial never touches the (possibly unmapped) UART1 MMIO. */
+ * with no second serial never touches the (possibly unmapped) UART1 MMIO.
+ * Before writing any UART1 register it does a fault-guarded probe read: if the
+ * MMIO region external-aborts (no device — e.g. QEMU < the version that maps
+ * the second PL011 without secure=on), UART1 is marked absent and framing is
+ * disabled instead of panicking the kernel. */
 void framing_ensure_hw(void);
+
+/* 1 if UART1 is present and initialized; 0 if absent (probe faulted) or not yet
+ * brought up. The /dev/uart0 ops return -1 when this is 0. */
+int framing_available(void);
+
+/* Data-abort fixup hook: called from the EC_DATA_ABORT_CUR handler. Returns 1
+ * (and swallows the abort by skipping the faulting probe load) iff the abort is
+ * the in-progress UART1 presence probe; 0 otherwise (real kernel fault). */
+struct trap_frame;
+int framing_probe_abort(struct trap_frame *frame);
+
+/* Decode one complete stuffed frame from an in-memory buffer (START..CRC).
+ * Same wire format as framing_recv but no UART. Returns FRAMING_OK / _ERR_CRC /
+ * _ERR_BADLEN. Used by the self-test and available for host-side style checks. */
+int framing_decode(const uint8_t *buf, int len, frame_t *out);
+
+/* In-memory protocol self-test (no hardware): encode -> decode round-trip with
+ * a 0xAA in the payload (exercises byte stuffing), plus a corrupted-frame check
+ * that must be rejected by the CRC. Returns 0 on pass, -1 on failure. */
+int framing_selftest(void);
 
 /* Encode a complete stuffed frame (START..CRC) into `out` (>= FRAMING_MAX_ENCODED
  * bytes) WITHOUT transmitting. Returns the encoded length, or -1 on bad len.

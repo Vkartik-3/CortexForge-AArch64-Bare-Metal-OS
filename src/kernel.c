@@ -19,6 +19,7 @@
 #include "strings/strings.h" // IWYU pragma: keep
 #include "timer/timer.h"
 #include "uart/uart.h"
+#include "uart/framing.h"
 #include "utils/utils.h"
 #include "vfs/vfs.h"
 #include <stdint.h>
@@ -848,8 +849,14 @@ void kernel_main() {
 
   vfs_init();
 
-  /* Register /dev/console, /dev/null, /dev/zero, /dev/rng */
+  /* Register /dev/console, /dev/null, /dev/zero, /dev/rng, /dev/uart0 */
   devices_register();
+
+  /* In-memory framing protocol self-test (no UART1 hardware needed) — verifies
+   * CRC-16/CCITT, encode/decode round-trip, byte stuffing, and corruption
+   * rejection. Runs on any QEMU; CI asserts the PASS line. */
+  uart_printf("[FRAMING] selftest: %s\n",
+              framing_selftest() == 0 ? "PASS" : "FAIL");
 
   vnode_t *mnt = vfs_create_node(vfs_root(), "mnt", VNODE_DIR);
   vfs_create_node(mnt, "fat32", VNODE_DIR);

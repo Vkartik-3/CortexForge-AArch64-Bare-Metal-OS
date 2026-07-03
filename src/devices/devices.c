@@ -193,6 +193,9 @@ static int uart0_read(vnode_t *n, file_t *f, void *buf, size_t count) {
   (void)n;
   (void)f;
   framing_ensure_hw();
+  if (!framing_available()) {
+    return -1; /* UART1 not provided by this platform/QEMU */
+  }
   frame_t fr;
   int r = framing_recv(&fr, framing_get_timeout());
   if (r == FRAMING_OK && fr.type == FRAME_TYPE_DATA) {
@@ -213,6 +216,9 @@ static int uart0_write(vnode_t *n, file_t *f, const void *buf, size_t count) {
   (void)n;
   (void)f;
   framing_ensure_hw();
+  if (!framing_available()) {
+    return -1; /* UART1 not provided by this platform/QEMU */
+  }
   uint16_t len = (count > FRAMING_MAX_PAYLOAD) ? FRAMING_MAX_PAYLOAD
                                                : (uint16_t)count;
   int r = framing_send_reliable(g_uart0_tx_seq, buf, len);

@@ -58,7 +58,11 @@ int main(void) {
   for (;;) {
     int n = sys_read(fd, buf, sizeof(buf));
     if (n <= 0) {
-      continue; /* read timeout or CRC error (kernel already NACKed) */
+      /* Timeout, CRC error (already NACKed), or UART1 absent on this platform.
+       * Brief pause so an absent-device -1 (which returns immediately) doesn't
+       * spin the CPU; a normal idle timeout already blocked ~1 s. */
+      sys_sleep(50);
+      continue;
     }
     report("recv: ", buf, n, seq);
 

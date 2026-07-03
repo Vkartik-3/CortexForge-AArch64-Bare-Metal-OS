@@ -1,6 +1,7 @@
 #include "exception.h"
 #include "bench/bench.h"
 #include "signal.h"
+#include "uart/framing.h"
 #include "gic/gic.h"
 #include "mm/mmu/mmu.h"
 #include "panic/panic.h"
@@ -194,6 +195,11 @@ void exception_dispatch(uint64_t type, trap_frame_t *frame) {
       break;
 
     case EC_DATA_ABORT_CUR:
+      /* Swallow the fault-guarded UART1 presence probe (device absent) instead
+       * of panicking; every other current-EL data abort is a real kernel bug. */
+      if (framing_probe_abort(frame)) {
+        break;
+      }
       dump_trap_frame(type, frame);
       kernel_panic("Data abort (kernel)");
       break;

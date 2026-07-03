@@ -1,6 +1,8 @@
 #include "framing.h"
 #include "uart.h"
+#include "exception.h"     /* trap_frame_t */
 #include "gic/gic.h"
+#include "mm/mmu/mmu.h"    /* PHYS_TO_VIRT */
 #include "timer/timer.h"
 #include "sched/sched.h"
 #include "strings/strings.h" // IWYU pragma: keep
@@ -19,14 +21,56 @@ void framing_init(void) {
   g_timeout = FRAMING_DEFAULT_TIMEOUT_TICKS;
 }
 
-static int g_hw_ready = 0;
+/* UART1 MMIO region base as seen through the kernel's upper-half device map. */
+#define UART1_PHYS_BASE 0x09040000ULL
+#define UART1_VA_BASE   (PHYS_TO_VIRT(UART1_PHYS_BASE))
+#define UART1_FR_VA     (PHYS_TO_VIRT(UART1_PHYS_BASE + 0x18))
+
+static int g_hw_ready       = 0; /* UART1 present + initialized */
+static int g_hw_absent      = 0; /* probe faulted => no device  */
+static volatile int g_probing        = 0; /* set while the probe load is live */
+static volatile int g_probe_faulted  = 0;
+
+int framing_available(void) { return g_hw_ready; }
+
+int framing_probe_abort(struct trap_frame *frame) {
+  if (!g_probing) {
+    return 0;
+  }
+  /* Only swallow aborts whose FAR is inside the UART1 page. */
+  if (((uint64_t)frame->far & ~0xFFFULL) != UART1_VA_BASE) {
+    return 0;
+  }
+  g_probe_faulted = 1;
+  frame->elr += 4; /* skip the faulting probe load and continue */
+  return 1;
+}
 
 void framing_ensure_hw(void) {
-  if (!g_hw_ready) {
-    uart1_init();                  /* configure PL011 + unmask RX interrupt */
-    gic_enable_irq(UART1_INTID);   /* route INTID 40 to this CPU            */
-    g_hw_ready = 1;
+  if (g_hw_ready || g_hw_absent) {
+    return;
   }
+  /* Fault-guarded presence probe: a single load from UART1_FR. If the region
+   * is unbacked, it external-aborts and framing_probe_abort() skips the load
+   * and sets g_probe_faulted (instead of the handler panicking). */
+  g_probe_faulted = 0;
+  g_probing = 1;
+  __asm__ __volatile__("dsb sy" ::: "memory");
+  volatile uint32_t probe;
+  __asm__ __volatile__("ldr %w0, [%1]" : "=r"(probe) : "r"(UART1_FR_VA) : "memory");
+  __asm__ __volatile__("dsb sy\n\tisb" ::: "memory");
+  g_probing = 0;
+  (void)probe;
+
+  if (g_probe_faulted) {
+    g_hw_absent = 1;
+    uart_println("[UART1] not present at 0x09040000 (no device) — framing disabled");
+    return;
+  }
+
+  uart1_init();                /* configure PL011 + unmask RX interrupt */
+  gic_enable_irq(UART1_INTID); /* route INTID 40 to this CPU            */
+  g_hw_ready = 1;
 }
 
 uint16_t crc16_ccitt(const uint8_t *data, size_t len) {
@@ -252,3 +296,79 @@ void framing_set_timeout(uint64_t ticks) {
 uint64_t framing_get_timeout(void) { return g_timeout; }
 
 void framing_get_stats(framing_stats_t *out) { *out = g_stats; }
+
+/* ---- in-memory decode + self-test (no hardware) -------------------------- */
+
+int framing_decode(const uint8_t *buf, int len, frame_t *out) {
+  if (len < 1 || buf[0] != FRAME_START) {
+    return FRAMING_ERR_BADLEN;
+  }
+  /* Un-stuff the body+CRC into a linear buffer. */
+  uint8_t lin[4 + FRAMING_MAX_PAYLOAD + 2];
+  int lpos = 0;
+  int pos = 1;
+  while (pos < len && lpos < (int)sizeof(lin)) {
+    uint8_t b = buf[pos++];
+    if (b == FRAME_START) {
+      if (pos >= len) {
+        return FRAMING_ERR_BADLEN;
+      }
+      uint8_t n = buf[pos++];
+      if (n == 0x00) {
+        lin[lpos++] = FRAME_START; /* stuffed literal */
+      } else {
+        return FRAMING_ERR_BADLEN; /* unexpected delimiter mid-frame */
+      }
+    } else {
+      lin[lpos++] = b;
+    }
+  }
+  if (lpos < 6) {
+    return FRAMING_ERR_BADLEN;
+  }
+  uint16_t plen = ((uint16_t)lin[2] << 8) | lin[3];
+  if (plen > FRAMING_MAX_PAYLOAD || lpos != 4 + (int)plen + 2) {
+    return FRAMING_ERR_BADLEN;
+  }
+  uint16_t rx_crc = ((uint16_t)lin[4 + plen] << 8) | lin[4 + plen + 1];
+  uint16_t calc   = crc16_ccitt(lin, (size_t)(4 + plen));
+
+  out->type = lin[0];
+  out->seq  = lin[1];
+  out->len  = plen;
+  memcpy(out->payload, lin + 4, plen);
+  return (calc == rx_crc) ? FRAMING_OK : FRAMING_ERR_CRC;
+}
+
+int framing_selftest(void) {
+  /* Payload includes a 0xAA so the encode/decode exercises byte stuffing. */
+  static const uint8_t pl[] = {'C', 'F', '-', 0xAA, 'f', 'r', 'a', 'm', 'e'};
+  const int plen = (int)sizeof(pl);
+
+  uint8_t enc[FRAMING_MAX_ENCODED];
+  int k = framing_encode(enc, FRAME_TYPE_DATA, 0x2A, pl, (uint16_t)plen);
+  if (k < 0) {
+    return -1;
+  }
+
+  frame_t f;
+  if (framing_decode(enc, k, &f) != FRAMING_OK) {
+    return -1;
+  }
+  if (f.type != FRAME_TYPE_DATA || f.seq != 0x2A || f.len != plen) {
+    return -1;
+  }
+  for (int i = 0; i < plen; i++) {
+    if (f.payload[i] != pl[i]) {
+      return -1;
+    }
+  }
+
+  /* Corrupt the seq byte (enc[2]; type=0x01, seq=0x2A — neither is 0xAA, so no
+   * stuffing shifts it). CRC covers seq, so decode must now report a CRC error. */
+  enc[2] ^= 0xFF;
+  if (framing_decode(enc, k, &f) != FRAMING_ERR_CRC) {
+    return -1;
+  }
+  return 0;
+}
