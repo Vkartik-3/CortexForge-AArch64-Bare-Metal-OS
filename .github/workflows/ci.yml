@@ -81,32 +81,41 @@ jobs:
       - name: Install eBPF toolchain
         run: |
           sudo apt-get update
-          # CO-RE compilation needs clang (BPF target), libbpf headers, and
-          # bpftool (skeleton gen + vmlinux.h from BTF). Kernel headers are NOT
-          # required — vmlinux.h is generated from /sys/kernel/btf/vmlinux.
-          #
-          # Install packages independently and tolerantly: apt-get aborts the
-          # whole transaction if ONE name is unavailable, and package names /
-          # preinstalled tools vary across runner images (clang & bpftool are
-          # often preinstalled). We then verify the essentials explicitly.
-          sudo apt-get install -y --no-install-recommends clang || true
-          sudo apt-get install -y --no-install-recommends libbpf-dev || true
-          # The runner's pre-installed /usr/sbin/bpftool is the linux-tools
-          # WRAPPER, which fails ("bpftool not found for kernel <ver>") because
-          # the kernel-specific tools package isn't present. Install the
-          # standalone, kernel-independent `bpftool` package (Ubuntu noble) and
-          # require it to actually RUN — not merely exist on PATH.
+          # CO-RE compilation needs clang (BPF target), libbpf headers, and a
+          # WORKING bpftool (skeleton gen + vmlinux.h from BTF). Kernel headers
+          # are NOT required — vmlinux.h comes from /sys/kernel/btf/vmlinux.
+          sudo apt-get install -y --no-install-recommends \
+            clang libbpf-dev libelf-dev zlib1g-dev pkg-config git make gcc || true
           sudo apt-get install -y --no-install-recommends bpftool || true
-          echo "--- toolchain check ---"
+
+          # The runner's /usr/sbin/bpftool is the linux-tools dispatch WRAPPER;
+          # it exits non-zero ("bpftool not found for kernel 6.17.x") because the
+          # kernel-specific tools package isn't installable for the azure kernel.
+          # Probe every candidate for one that actually RUNS; if none, build the
+          # standalone, kernel-independent bpftool from source.
+          BPFTOOL=""
+          for c in /usr/sbin/bpftool /usr/bin/bpftool /usr/local/sbin/bpftool \
+                   /usr/local/bin/bpftool $(ls /usr/lib/linux-tools/*/bpftool 2>/dev/null || true); do
+            if [ -x "$c" ] && "$c" version >/dev/null 2>&1; then BPFTOOL="$c"; break; fi
+          done
+          if [ -z "$BPFTOOL" ]; then
+            echo "no working bpftool packaged — building from source"
+            git clone --recurse-submodules --depth 1 \
+              https://github.com/libbpf/bpftool.git /tmp/bpftool
+            make -C /tmp/bpftool/src
+            BPFTOOL=/tmp/bpftool/src/bpftool
+          fi
+          echo "using bpftool: $BPFTOOL"
+          "$BPFTOOL" version
+          echo "BPFTOOL=$BPFTOOL" >> "$GITHUB_ENV"
+
           command -v clang >/dev/null || { echo "ERROR: clang not found"; exit 1; }
-          bpftool version   || { echo "ERROR: bpftool not functional (wrapper only?)"; exit 1; }
           test -f /usr/include/bpf/bpf_helpers.h || { echo "ERROR: libbpf headers not found"; exit 1; }
-          test -r /sys/kernel/btf/vmlinux || { echo "ERROR: kernel BTF (/sys/kernel/btf/vmlinux) not found"; exit 1; }
+          test -r /sys/kernel/btf/vmlinux || { echo "ERROR: kernel BTF not found"; exit 1; }
           clang --version | head -1
-          echo "kernel BTF present"
 
       - name: Build eBPF XDP monitor (compile only)
-        run: make -C tools/ebpf
+        run: make -C tools/ebpf BPFTOOL="$BPFTOOL"
 
       - name: Verify build artifacts exist
         run: |
