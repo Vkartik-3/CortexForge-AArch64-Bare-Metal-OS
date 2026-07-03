@@ -15,8 +15,6 @@ The original copyright and license notices remain intact.
 The following features are planned and have not yet been
 presented as completed:
 
-- Reliable UART framing with CRC-16, sequence numbers,
-  ACK/NACK, and retransmission
 - Host-side eBPF/XDP network monitoring
 
 ## Contributions by Kartik Vadhawana
@@ -38,11 +36,14 @@ Completed extensions (implemented and tested under QEMU):
 
   | Benchmark | Cycles | ns @62.5 MHz (nominal) |
   |---|---|---|
-  | Null syscall round-trip (`svc`→dispatch→`eret`) | 230 | 3,680 |
+  | Null syscall round-trip (`svc`→dispatch→`eret`) | 299 | 4,784 |
   | Context switch (round-trip; ~131/switch) | 261 | 4,176 |
   | Timer IRQ deadline→handler entry | 6 ticks | 96 |
   | Signal delivery (pending→handler-ready) | 653 | 10,448 |
   | Signal return (`sigreturn` context restore) | 434 | 6,944 |
+  | UART frame encode (64-B payload: build+CRC+stuff) | 12,164 | ~196,000 |
+  | CRC-16/CCITT over 64 bytes | 8,894 | ~142,000 |
+  | CRC-16/CCITT over 256 bytes | 35,602 | ~569,000 |
 
   > Canonical values are from the GitHub Actions runner (Ubuntu,
   > `aarch64-linux-gnu-gcc`, QEMU `-icount shift=0`) and are published as a CI
@@ -68,6 +69,31 @@ Completed extensions (implemented and tested under QEMU):
 - Verified: `./sigtest` ([user/sigtest.c](user/sigtest.c)) arms a 2 s alarm,
   the handler prints `SIGALRM received!`, and `main` resumes to print
   `signal test PASS` in QEMU.
+
+### Reliable UART framing protocol
+
+- **CRC-16/CCITT framing protocol** ([src/lib/uart/framing.c](src/lib/uart/framing.c),
+  [framing.h](src/lib/uart/framing.h)) — frame format
+  `START(0xAA) | TYPE | SEQ | LEN(2, BE) | PAYLOAD | CRC16(2, BE)` with
+  CRC-16/CCITT (poly `0x1021`, init `0xFFFF`) over TYPE..PAYLOAD, whole-body
+  byte stuffing (`0xAA` → `0xAA 0x00`), and sequence numbers.
+- **`/dev/uart0` character device on UART1 (INTID 40)**
+  ([src/devices/devices.c](src/devices/devices.c)) — interrupt-driven RX with a
+  256-byte ring buffer; `read()` auto-ACKs a received frame, `write()` does a
+  reliable send. `ioctl` (via a new `SYS_IOCTL`) exposes `SET_TIMEOUT` and
+  `GET_STATS`.
+- **Physical UART separation** — `/dev/console` stays on UART0 (`0x09000000`,
+  polling); the framing protocol runs on UART1 (`0x09040000`, INTID 40) so
+  framed bytes never mix with console output. Requires two QEMU serial ports.
+- **ACK/NACK + retransmission** — reliable send retransmits up to 3× on timeout
+  and immediately on NACK; a corrupted-CRC frame triggers a NACK. Retransmission
+  is **verified by a dropped-ACK test**: withholding one ACK makes the kernel
+  retransmit the identical echo frame.
+- **Python host-side client** ([scripts/uart-client.py](scripts/uart-client.py))
+  speaks the same protocol over QEMU's UART1 Unix socket. Against the in-guest
+  echo server ([user/uartecho.c](user/uartecho.c)): **10/10 clean exchanges,
+  RTT mean 0.32 ms / p99 0.91 ms**, plus verified NACK-on-bad-CRC and
+  retransmit-on-dropped-ACK. Runs as phase 2 of CI.
 
 Licensed under GPL-3.0. See LICENSE file for details.
 
