@@ -84,18 +84,22 @@ jobs:
           # CO-RE compilation needs clang (BPF target), libbpf headers, and a
           # WORKING bpftool (skeleton gen + vmlinux.h from BTF). Kernel headers
           # are NOT required — vmlinux.h comes from /sys/kernel/btf/vmlinux.
+          # llvm provides llvm-strip, needed both by our BPF compile pipeline and
+          # by bpftool's own source build; linux-tools-generic ships a real
+          # (versioned) bpftool binary we can call directly.
           sudo apt-get install -y --no-install-recommends \
-            clang libbpf-dev libelf-dev zlib1g-dev pkg-config git make gcc || true
+            clang llvm libbpf-dev libelf-dev zlib1g-dev pkg-config git make gcc \
+            linux-tools-generic || true
           sudo apt-get install -y --no-install-recommends bpftool || true
 
-          # The runner's /usr/sbin/bpftool is the linux-tools dispatch WRAPPER;
-          # it exits non-zero ("bpftool not found for kernel 6.17.x") because the
+          # The runner's /usr/sbin/bpftool is the linux-tools dispatch WRAPPER; it
+          # exits non-zero ("bpftool not found for kernel 6.17.x") because the
           # kernel-specific tools package isn't installable for the azure kernel.
-          # Probe every candidate for one that actually RUNS; if none, build the
-          # standalone, kernel-independent bpftool from source.
+          # Probe every candidate for one that actually RUNS (versioned real
+          # binaries first, wrapper last); if none, build bpftool from source.
           BPFTOOL=""
-          for c in /usr/sbin/bpftool /usr/bin/bpftool /usr/local/sbin/bpftool \
-                   /usr/local/bin/bpftool $(ls /usr/lib/linux-tools/*/bpftool 2>/dev/null || true); do
+          for c in $(ls /usr/lib/linux-tools/*/bpftool /usr/lib/linux-tools-*/bpftool 2>/dev/null || true) \
+                   /usr/local/sbin/bpftool /usr/local/bin/bpftool /usr/bin/bpftool /usr/sbin/bpftool; do
             if [ -x "$c" ] && "$c" version >/dev/null 2>&1; then BPFTOOL="$c"; break; fi
           done
           if [ -z "$BPFTOOL" ]; then
