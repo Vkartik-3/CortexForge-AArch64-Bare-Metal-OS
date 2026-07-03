@@ -84,11 +84,26 @@ jobs:
           # CO-RE compilation needs clang (BPF target), libbpf headers, and
           # bpftool (skeleton gen + vmlinux.h from BTF). Kernel headers are NOT
           # required — vmlinux.h is generated from /sys/kernel/btf/vmlinux.
-          sudo apt-get install -y --no-install-recommends \
-            clang llvm libbpf-dev bpftool
+          #
+          # Install packages independently and tolerantly: apt-get aborts the
+          # whole transaction if ONE name is unavailable, and package names /
+          # preinstalled tools vary across runner images (clang & bpftool are
+          # often preinstalled). We then verify the essentials explicitly.
+          sudo apt-get install -y --no-install-recommends clang || true
+          sudo apt-get install -y --no-install-recommends libbpf-dev || true
+          if ! command -v bpftool >/dev/null 2>&1; then
+            sudo apt-get install -y --no-install-recommends bpftool \
+              || sudo apt-get install -y --no-install-recommends linux-tools-generic \
+              || true
+          fi
+          echo "--- toolchain check ---"
+          command -v clang   >/dev/null || { echo "ERROR: clang not found";   exit 1; }
+          command -v bpftool >/dev/null || { echo "ERROR: bpftool not found"; exit 1; }
+          test -f /usr/include/bpf/bpf_helpers.h || { echo "ERROR: libbpf headers not found"; exit 1; }
+          test -r /sys/kernel/btf/vmlinux || { echo "ERROR: kernel BTF (/sys/kernel/btf/vmlinux) not found"; exit 1; }
           clang --version | head -1
           bpftool version | head -1
-          test -r /sys/kernel/btf/vmlinux && echo "kernel BTF present"
+          echo "kernel BTF present"
 
       - name: Build eBPF XDP monitor (compile only)
         run: make -C tools/ebpf

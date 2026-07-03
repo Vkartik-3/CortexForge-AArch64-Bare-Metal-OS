@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
   signal(SIGINT, on_signal);
   signal(SIGTERM, on_signal);
 
-  struct xdp_monitor_bpf *skel = xdp_monitor_bpf__open_and_load();
+  struct xdp_monitor *skel = xdp_monitor__open_and_load();
   if (!skel) {
     fprintf(stderr, "[XDP] failed to open/load BPF skeleton\n");
     return 1;
@@ -124,7 +124,7 @@ int main(int argc, char **argv) {
   if (bpf_xdp_attach(ifindex, prog_fd, flags, NULL) != 0) {
     fprintf(stderr, "[XDP] attach to %s failed: %s (need root/CAP_NET_ADMIN)\n",
             ifname, strerror(errno));
-    xdp_monitor_bpf__destroy(skel);
+    xdp_monitor__destroy(skel);
     return 1;
   }
   printf("[XDP] attached to %s (ifindex=%u) in SKB mode\n", ifname, ifindex);
@@ -137,7 +137,7 @@ int main(int argc, char **argv) {
   if (!rb) {
     fprintf(stderr, "[XDP] failed to create ring buffer\n");
     bpf_xdp_detach(ifindex, flags, NULL);
-    xdp_monitor_bpf__destroy(skel);
+    xdp_monitor__destroy(skel);
     return 1;
   }
 
@@ -174,7 +174,7 @@ int main(int argc, char **argv) {
 
   ring_buffer__free(rb);
   bpf_xdp_detach(ifindex, flags, NULL);
-  xdp_monitor_bpf__destroy(skel);
+  xdp_monitor__destroy(skel);
   printf("[XDP] detached from %s cleanly\n", ifname);
   return 0;
 }

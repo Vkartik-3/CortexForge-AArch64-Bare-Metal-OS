@@ -40,9 +40,11 @@ $(VMLINUX):
 $(BPF_OBJ): xdp_monitor.c xdp_monitor.h $(VMLINUX)
 	$(CLANG) $(BPF_CFLAGS) -c xdp_monitor.c -o $@
 
-# Generate the libbpf skeleton header from the BPF object.
+# Generate the libbpf skeleton header from the BPF object. `name xdp_monitor`
+# pins the skeleton struct/function prefix so monitor.c matches deterministically
+# regardless of bpftool's default extension-stripping.
 $(SKEL): $(BPF_OBJ)
-	$(BPFTOOL) gen skeleton $< > $@
+	$(BPFTOOL) gen skeleton $< name xdp_monitor > $@
 
 # Build the userspace loader against the skeleton and libbpf.
 monitor: monitor.c $(SKEL) xdp_monitor.h
