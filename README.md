@@ -15,17 +15,15 @@ The original copyright and license notices remain intact.
 The following features are planned and have not yet been
 presented as completed:
 
-- POSIX-style process signals (sigaction, kill, sigprocmask,
-  sigreturn, SIGALRM)
 - Reliable UART framing with CRC-16, sequence numbers,
   ACK/NACK, and retransmission
 - Host-side eBPF/XDP network monitoring
-- Automated GitHub Actions CI with headless QEMU boot assertions
-- Cycle-level latency benchmarks using the ARM PMU counter
 
 ## Contributions by Kartik Vadhawana
 
 Completed extensions (implemented and tested under QEMU):
+
+### GitHub Actions CI + PMU benchmark harness
 
 - **GitHub Actions CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) —
   builds the kernel + FAT32 disk, boots headless QEMU, asserts the serial
@@ -40,13 +38,33 @@ Completed extensions (implemented and tested under QEMU):
 
   | Benchmark | Cycles | ns @62.5 MHz (nominal) |
   |---|---|---|
-  | Null syscall round-trip (`svc`→dispatch→`eret`) | 246 | 3,936 |
+  | Null syscall round-trip (`svc`→dispatch→`eret`) | 293 | 4,688 |
   | Context switch (round-trip; ~131/switch) | 261 | 4,176 |
   | Timer IRQ deadline→handler entry | 6 ticks | 96 |
+  | Signal delivery (pending→handler-ready) | 653 | 10,448 |
+  | Signal return (`sigreturn` context restore) | 434 | 6,944 |
 
   > PMCCNTR under QEMU/TCG is an *emulated* cycle counter, not silicon cycles;
   > the ns column is a nominal conversion assuming CPU freq == CNTFRQ (62.5 MHz).
   > The cycle counts are real measured values from the running emulator.
+
+### POSIX signal subsystem
+
+- **`sigaction`, `kill`, `sigprocmask`, `sigreturn`, `SIGALRM`**
+  ([src/syscall/signal.c](src/syscall/signal.c)) — per-task handlers, pending /
+  blocked masks, and a per-task alarm countdown driven by the timer IRQ.
+- Signals are delivered lazily on the **return-to-EL0** path only (never to an
+  EL1 task); the handler runs at EL0 with a signal frame built on the user
+  stack (16-byte aligned, no dynamic allocation), and `sigreturn` restores the
+  interrupted context exactly (PC/SP/registers/PSTATE).
+- **VDSO-style sigreturn trampoline** — a kernel-owned, read-only, EL0-
+  executable page mapped at a fixed VA (`0x300000`) into every address space,
+  so a handler's `ret` traps straight into `SYS_SIGRETURN`.
+- `SIGKILL` is uncatchable and unignorable; user-stack overflow during frame
+  setup terminates the task.
+- Verified: `./sigtest` ([user/sigtest.c](user/sigtest.c)) arms a 2 s alarm,
+  the handler prints `SIGALRM received!`, and `main` resumes to print
+  `signal test PASS` in QEMU.
 
 Licensed under GPL-3.0. See LICENSE file for details.
 
