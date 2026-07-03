@@ -38,15 +38,18 @@ Completed extensions (implemented and tested under QEMU):
 
   | Benchmark | Cycles | ns @62.5 MHz (nominal) |
   |---|---|---|
-  | Null syscall round-trip (`svc`→dispatch→`eret`) | 293 | 4,688 |
+  | Null syscall round-trip (`svc`→dispatch→`eret`) | 230 | 3,680 |
   | Context switch (round-trip; ~131/switch) | 261 | 4,176 |
   | Timer IRQ deadline→handler entry | 6 ticks | 96 |
   | Signal delivery (pending→handler-ready) | 653 | 10,448 |
   | Signal return (`sigreturn` context restore) | 434 | 6,944 |
 
-  > PMCCNTR under QEMU/TCG is an *emulated* cycle counter, not silicon cycles;
-  > the ns column is a nominal conversion assuming CPU freq == CNTFRQ (62.5 MHz).
-  > The cycle counts are real measured values from the running emulator.
+  > Canonical values are from the GitHub Actions runner (Ubuntu,
+  > `aarch64-linux-gnu-gcc`, QEMU `-icount shift=0`) and are published as a CI
+  > artifact on every run. PMCCNTR under QEMU/TCG is an *emulated* cycle
+  > counter, not silicon cycles; the ns column is a nominal conversion assuming
+  > CPU freq == CNTFRQ (62.5 MHz). The cycle counts are real measured values
+  > from the running emulator.
 
 ### POSIX signal subsystem
 
