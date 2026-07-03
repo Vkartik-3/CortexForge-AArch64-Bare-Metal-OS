@@ -91,18 +91,18 @@ jobs:
           # often preinstalled). We then verify the essentials explicitly.
           sudo apt-get install -y --no-install-recommends clang || true
           sudo apt-get install -y --no-install-recommends libbpf-dev || true
-          if ! command -v bpftool >/dev/null 2>&1; then
-            sudo apt-get install -y --no-install-recommends bpftool \
-              || sudo apt-get install -y --no-install-recommends linux-tools-generic \
-              || true
-          fi
+          # The runner's pre-installed /usr/sbin/bpftool is the linux-tools
+          # WRAPPER, which fails ("bpftool not found for kernel <ver>") because
+          # the kernel-specific tools package isn't present. Install the
+          # standalone, kernel-independent `bpftool` package (Ubuntu noble) and
+          # require it to actually RUN — not merely exist on PATH.
+          sudo apt-get install -y --no-install-recommends bpftool || true
           echo "--- toolchain check ---"
-          command -v clang   >/dev/null || { echo "ERROR: clang not found";   exit 1; }
-          command -v bpftool >/dev/null || { echo "ERROR: bpftool not found"; exit 1; }
+          command -v clang >/dev/null || { echo "ERROR: clang not found"; exit 1; }
+          bpftool version   || { echo "ERROR: bpftool not functional (wrapper only?)"; exit 1; }
           test -f /usr/include/bpf/bpf_helpers.h || { echo "ERROR: libbpf headers not found"; exit 1; }
           test -r /sys/kernel/btf/vmlinux || { echo "ERROR: kernel BTF (/sys/kernel/btf/vmlinux) not found"; exit 1; }
           clang --version | head -1
-          bpftool version | head -1
           echo "kernel BTF present"
 
       - name: Build eBPF XDP monitor (compile only)
