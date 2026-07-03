@@ -10,6 +10,7 @@
 #include "mm/heap/heap.h"
 #include "mm/pmm/pmm.h"
 #include "strings/strings.h"
+#include "bench/bench.h"
 #include "elf.h"
 
 #include <stddef.h>
@@ -494,6 +495,13 @@ void syscall_dispatch(trap_frame_t *frame) {
   }
 
 
+
+  case SYS_BENCH:
+    /* Run the PMU benchmark harness at EL1 (PMCCNTR_EL0 is not EL0-readable).
+     * No arguments; prints [BENCH] result lines to the console and returns 0. */
+    bench_run();
+    ret = 0;
+    break;
 
   default:
     uart_printf("[SYSCALL] Unknown syscall %u\n", num);

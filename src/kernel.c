@@ -162,6 +162,13 @@ static inline int64_t sys_balloon(uint64_t op, uint64_t n) {
   return (int64_t)x0;
 }
 
+static inline int64_t sys_bench(void) {
+  register int64_t x0 __asm__("x0");
+  register uint64_t x8 __asm__("x8") = 15; /* SYS_BENCH */
+  __asm__ __volatile__("svc #0" : "=r"(x0) : "r"(x8) : "memory");
+  return x0;
+}
+
 /* ----------------------------------------------------------------
  * Tiny EL0 user-space helpers used by task_shell. Defined inline
  * because user-space cannot call into the kernel string library.
@@ -252,6 +259,7 @@ static void sh_help(void) {
       "  version         - cat /proc/version\n"
       "  cpuinfo         - cat /proc/cpuinfo (MIDR / cache / features / cycles)\n"
       "  stack           - stress test demand-paged user stack growth\n"
+      "  bench           - PMU cycle-level latency benchmarks (syscall/ctxsw/irq)\n"
       "  cat <path>      - print a file\n"
       "  hexdump <path>  - hex+ascii dump of a file\n"
       "  echo <text>     - print text\n"
@@ -306,7 +314,7 @@ static void sh_cat(const char *path) {
 }
 
 static void task_shell(void) {
-  sh_print("\nWelcome to the Fermi shell. Type 'help' to start.\n");
+  sh_print("\nWelcome to CortexForge. Type 'help' to start.\n");
   while (1) {
     sh_print("$ ");
     char line[128];
@@ -581,6 +589,11 @@ static void task_shell(void) {
       }
       sh_print(ok ? "stack: 64 KiB stack probe OK (16 page-grows)\n"
                   : "stack: 64 KiB stack probe FAILED\n");
+    } else if (u_streq(line, "bench")) {
+      /* PMU cycle-level latency benchmarks. The harness must read PMCCNTR_EL0,
+       * which is not enabled at EL0, so this traps into the kernel via
+       * SYS_BENCH; all [BENCH] output is printed from EL1. */
+      sys_bench();
     } else if (u_streq(line, "exit")) {
       sh_print("bye!\n");
       sys_exit();

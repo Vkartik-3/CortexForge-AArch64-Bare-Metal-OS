@@ -1,4 +1,5 @@
 #include "exception.h"
+#include "bench/bench.h"
 #include "gic/gic.h"
 #include "mm/mmu/mmu.h"
 #include "panic/panic.h"
@@ -258,8 +259,12 @@ void exception_dispatch(uint64_t type, trap_frame_t *frame) {
 
     gic_end_irq(intid);
 
-    // schedule after EOI so GIC can deliver future IRQs
-    schedule();
+    // schedule after EOI so GIC can deliver future IRQs. Suppressed while the
+    // PMU harness samples IRQ latency so the core idles (WFI) between ticks and
+    // we measure pure interrupt response instead of scheduler load.
+    if (!bench_irq_sampling()) {
+      schedule();
+    }
     break;
   }
 

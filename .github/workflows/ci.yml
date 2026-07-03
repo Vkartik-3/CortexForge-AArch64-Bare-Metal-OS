@@ -1,0 +1,55 @@
+name: CI
+
+# Build the kernel, boot it headless under QEMU, assert the boot-success
+# marker on the serial console, then run the PMU benchmark harness and publish
+# the results as an artifact. Runs on every push and pull request to main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-boot-bench:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            qemu-system-arm \
+            mtools \
+            dosfstools
+          # Sanity: show the tool versions we actually got.
+          aarch64-linux-gnu-gcc --version | head -1
+          qemu-system-aarch64 --version | head -1
+
+      - name: Build kernel
+        run: make            # -> build/kernel.elf (CROSS_COMPILE defaults to aarch64-linux-gnu-)
+
+      - name: Build FAT32 disk image
+        run: make disk       # -> build/disk.img
+
+      - name: Boot headless QEMU + assert boot marker + run PMU benchmark
+        run: ./scripts/ci-boot-bench.sh
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench/results.txt
+          if-no-files-found: warn
+
+      - name: Upload serial log (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serial-log
+          path: build/serial.log
+          if-no-files-found: warn

@@ -25,8 +25,28 @@ presented as completed:
 
 ## Contributions by Kartik Vadhawana
 
-Completed extensions will be listed here after they have been
-implemented, tested, and committed.
+Completed extensions (implemented and tested under QEMU):
+
+- **GitHub Actions CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) —
+  builds the kernel + FAT32 disk, boots headless QEMU, asserts the serial
+  boot-success marker, runs the PMU benchmark, and publishes the results as a
+  build artifact. Boot/bench are driven by
+  [scripts/ci-boot-bench.sh](scripts/ci-boot-bench.sh).
+- **PMU benchmark harness** ([src/lib/bench/](src/lib/bench/)) — cycle-level
+  latency microbenchmarks (`bench` shell command → `SYS_BENCH` → EL1 harness on
+  `PMCCNTR_EL0`). 1000 iterations each; reports min/max/mean/p50/p99. Measured
+  under `qemu-system-aarch64 -icount shift=0` (deterministic, instruction-
+  accurate cycle counting):
+
+  | Benchmark | Cycles | ns @62.5 MHz (nominal) |
+  |---|---|---|
+  | Null syscall round-trip (`svc`→dispatch→`eret`) | 246 | 3,936 |
+  | Context switch (round-trip; ~131/switch) | 261 | 4,176 |
+  | Timer IRQ deadline→handler entry | 6 ticks | 96 |
+
+  > PMCCNTR under QEMU/TCG is an *emulated* cycle counter, not silicon cycles;
+  > the ns column is a nominal conversion assuming CPU freq == CNTFRQ (62.5 MHz).
+  > The cycle counts are real measured values from the running emulator.
 
 Licensed under GPL-3.0. See LICENSE file for details.
 

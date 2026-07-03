@@ -1,4 +1,5 @@
 #include "timer.h"
+#include "bench/bench.h"
 #include "gic/gic.h"
 #include "sched/sched.h"
 #include "uart/uart.h"
@@ -54,6 +55,17 @@ void timer_stop() {
 }
 
 void timer_handle_irq() {
+  // IRQ-latency instrumentation (PMU bench harness). CNTP_CVAL_EL0 still holds
+  // the absolute deadline that just fired; CNTPCT_EL0 is "now". Their delta is
+  // the deadline→handler-entry latency in timer ticks. Sampled first thing so
+  // nothing in the handler (wake_sleepers, logging) inflates the measurement.
+  {
+    uint64_t fired_deadline, now_pct;
+    __asm__ __volatile__("mrs %0, cntp_cval_el0" : "=r"(fired_deadline));
+    __asm__ __volatile__("mrs %0, cntpct_el0" : "=r"(now_pct));
+    bench_irq_sample(now_pct - fired_deadline);
+  }
+
   tick_count++;
 
   // Re-arm by advancing the absolute deadline. This drifts at most one
@@ -95,3 +107,6 @@ uint64_t timer_uptime_ms(void) { return tick_count * TIMER_INTERVAL_MS; }
 uint64_t timer_uptime_seconds(void) {
   return (tick_count * TIMER_INTERVAL_MS) / 1000;
 }
+
+uint64_t timer_get_interval_ticks(void) { return timer_interval; }
+void timer_set_interval_ticks(uint64_t ticks) { timer_interval = ticks; }
