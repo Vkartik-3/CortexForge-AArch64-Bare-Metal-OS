@@ -65,3 +65,46 @@ jobs:
             build/serial.log
             build/serial-uart.log
           if-no-files-found: warn
+
+  # Compile-only verification of the eBPF/XDP network monitor. Runs in parallel
+  # with build-boot-bench. NOTE: this job does NOT run the XDP program — loading
+  # and attaching XDP needs root (CAP_NET_ADMIN) and a real TAP interface, which
+  # is out of scope for CI. The runtime end-to-end test lives in
+  # scripts/test-ebpf.sh (root + Linux). Here we only prove it compiles: the BPF
+  # object, the libbpf skeleton, and the userspace loader all build.
+  ebpf-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install eBPF toolchain
+        run: |
+          sudo apt-get update
+          # CO-RE compilation needs clang (BPF target), libbpf headers, and
+          # bpftool (skeleton gen + vmlinux.h from BTF). Kernel headers are NOT
+          # required — vmlinux.h is generated from /sys/kernel/btf/vmlinux.
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev bpftool
+          clang --version | head -1
+          bpftool version | head -1
+          test -r /sys/kernel/btf/vmlinux && echo "kernel BTF present"
+
+      - name: Build eBPF XDP monitor (compile only)
+        run: make -C tools/ebpf
+
+      - name: Verify build artifacts exist
+        run: |
+          test -f tools/ebpf/xdp_monitor.bpf.o
+          test -f tools/ebpf/xdp_monitor.skel.h
+          test -x tools/ebpf/monitor
+          echo "eBPF artifacts built:"
+          ls -l tools/ebpf/xdp_monitor.bpf.o tools/ebpf/monitor
+
+      - name: Upload eBPF object (artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ebpf-object
+          path: tools/ebpf/xdp_monitor.bpf.o
+          if-no-files-found: warn

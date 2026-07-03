@@ -12,10 +12,7 @@ The original copyright and license notices remain intact.
 
 ## Planned Extensions
 
-The following features are planned and have not yet been
-presented as completed:
-
-- Host-side eBPF/XDP network monitoring
+All five planned extensions are complete (see below).
 
 ## Contributions by Kartik Vadhawana
 
@@ -94,6 +91,27 @@ Completed extensions (implemented and tested under QEMU):
   echo server ([user/uartecho.c](user/uartecho.c)): **10/10 clean exchanges,
   RTT mean 0.32 ms / p99 0.91 ms**, plus verified NACK-on-bad-CRC and
   retransmit-on-dropped-ACK. Runs as phase 2 of CI.
+
+### eBPF/XDP host-side network monitor
+
+- **XDP monitor** ([tools/ebpf/](tools/ebpf/)) — a libbpf **CO-RE** program
+  (`vmlinux.h` from kernel BTF) that attaches at the **XDP hook** on the QEMU
+  TAP interface and passively classifies traffic from the CortexForge guest:
+  Ethernet / ARP / IPv4 (ICMP, UDP, other). Monitoring only — every path returns
+  **`XDP_PASS`** (never drops).
+- Aggregate counters in a `BPF_MAP_TYPE_ARRAY` (total / arp / icmp / udp / other
+  / bytes) plus per-packet events (`src_ip`, `dst_ip`, size, `bpf_ktime_get_ns`)
+  streamed through a `BPF_MAP_TYPE_RINGBUF`. The userspace loader
+  ([monitor.c](tools/ebpf/monitor.c)) prints per-packet lines and a 5-second
+  stats summary, and detaches cleanly on Ctrl-C.
+- **Attach mode:** `XDP_FLAGS_SKB_MODE` (generic) — native/driver XDP is not
+  available on TAP interfaces. XDP hooks **ingress**, so it observes the guest's
+  outbound ARP + ICMP-echo traffic to the host.
+- **Runtime requires:** Linux 5.15+, root (`CAP_NET_ADMIN`), and a TAP interface
+  — the project's default QEMU uses slirp (no host interface), so the end-to-end
+  test ([scripts/test-ebpf.sh](scripts/test-ebpf.sh)) reconfigures QEMU to TAP.
+  Toolchain: `clang`, `libbpf-dev`, `bpftool`. **CI verifies compilation only**
+  (running XDP needs root + a real interface).
 
 Licensed under GPL-3.0. See LICENSE file for details.
 
