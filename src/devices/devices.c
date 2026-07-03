@@ -192,6 +192,7 @@ static uint8_t g_uart0_tx_seq = 0;
 static int uart0_read(vnode_t *n, file_t *f, void *buf, size_t count) {
   (void)n;
   (void)f;
+  framing_ensure_hw();
   frame_t fr;
   int r = framing_recv(&fr, framing_get_timeout());
   if (r == FRAMING_OK && fr.type == FRAME_TYPE_DATA) {
@@ -211,6 +212,7 @@ static int uart0_read(vnode_t *n, file_t *f, void *buf, size_t count) {
 static int uart0_write(vnode_t *n, file_t *f, const void *buf, size_t count) {
   (void)n;
   (void)f;
+  framing_ensure_hw();
   uint16_t len = (count > FRAMING_MAX_PAYLOAD) ? FRAMING_MAX_PAYLOAD
                                                : (uint16_t)count;
   int r = framing_send_reliable(g_uart0_tx_seq, buf, len);

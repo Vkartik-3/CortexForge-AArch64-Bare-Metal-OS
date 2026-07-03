@@ -63,9 +63,10 @@ LOG="build/serial.log"
 rm -f "$LOG"
 FIFO="$(mktemp -u)"; mkfifo "$FIFO"
 
+# Single serial (-nographic): UART1 is initialized lazily on first /dev/uart0
+# use, so the bench run never touches it and needs only the console UART.
 timeout "$HARD_TIMEOUT" "$QEMU" \
-  -machine virt,gic-version=3 -m 8G -display none -cpu cortex-a72 -icount shift=0 \
-  -serial mon:stdio -serial null \
+  -machine virt,gic-version=3 -m 8G -nographic -cpu cortex-a72 -icount shift=0 \
   -device virtio-rng-pci,disable-legacy=on \
   -drive file="$DISK",if=none,format=raw,id=d0 \
   -device virtio-blk-pci,drive=d0,disable-legacy=on \

@@ -829,10 +829,11 @@ void kernel_main() {
 
   gic_init();
 
-  /* Secondary UART (UART1 @ 0x09040000) for the reliable framing protocol.
-   * Interrupt-driven RX (INTID 40); kept separate from the console UART. */
-  uart1_init();
-  gic_enable_irq(UART1_INTID);
+  /* NOTE: the secondary UART (UART1 @ 0x09040000, framing protocol) is
+   * initialized LAZILY on the first /dev/uart0 access — not here. QEMU only
+   * maps that MMIO region when a second -serial backend is present, so probing
+   * it unconditionally at boot would fault on a single-serial invocation (e.g.
+   * the benchmark run). See framing_ensure_hw(). */
 
   pci_enumerate_bus();
   pci_virtio_rng_init();

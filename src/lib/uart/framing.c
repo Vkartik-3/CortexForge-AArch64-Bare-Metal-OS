@@ -1,5 +1,6 @@
 #include "framing.h"
 #include "uart.h"
+#include "gic/gic.h"
 #include "timer/timer.h"
 #include "sched/sched.h"
 #include "strings/strings.h" // IWYU pragma: keep
@@ -16,6 +17,16 @@ static uint64_t        g_timeout = FRAMING_DEFAULT_TIMEOUT_TICKS;
 void framing_init(void) {
   memset(&g_stats, 0, sizeof(g_stats));
   g_timeout = FRAMING_DEFAULT_TIMEOUT_TICKS;
+}
+
+static int g_hw_ready = 0;
+
+void framing_ensure_hw(void) {
+  if (!g_hw_ready) {
+    uart1_init();                  /* configure PL011 + unmask RX interrupt */
+    gic_enable_irq(UART1_INTID);   /* route INTID 40 to this CPU            */
+    g_hw_ready = 1;
+  }
 }
 
 uint16_t crc16_ccitt(const uint8_t *data, size_t len) {

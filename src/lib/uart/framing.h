@@ -62,6 +62,11 @@ uint16_t crc16_ccitt(const uint8_t *data, size_t len);
 
 void framing_init(void);
 
+/* Lazily bring up the UART1 hardware (uart1_init + enable INTID 40) on first
+ * use. Idempotent. Called from the /dev/uart0 ops so a boot / benchmark run
+ * with no second serial never touches the (possibly unmapped) UART1 MMIO. */
+void framing_ensure_hw(void);
+
 /* Encode a complete stuffed frame (START..CRC) into `out` (>= FRAMING_MAX_ENCODED
  * bytes) WITHOUT transmitting. Returns the encoded length, or -1 on bad len.
  * Pure computation (build + CRC-16 + byte-stuffing) — used by framing_send and
