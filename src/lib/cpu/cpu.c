@@ -75,11 +75,13 @@ static const char *arm_part_name(uint16_t part) {
   case 0xD09: return "Cortex-A73";
   case 0xD0A: return "Cortex-A75";
   case 0xD0B: return "Cortex-A76";
+  case 0xD0C: return "Neoverse-N1"; // AWS Graviton2
   case 0xD0D: return "Cortex-A77";
-  case 0xD40: return "Neoverse-V1";
+  case 0xD40: return "Neoverse-V1"; // AWS Graviton3
   case 0xD41: return "Cortex-A78";
   case 0xD49: return "Neoverse-N2";
   case 0xD4A: return "Neoverse-E1";
+  case 0xD4F: return "Neoverse-V2"; // AWS Graviton4
   default:    return "unknown";
   }
 }

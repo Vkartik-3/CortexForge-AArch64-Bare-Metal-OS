@@ -51,7 +51,10 @@ DISK_IMG := $(BUILD_DIR)/disk.img
 DISK_SIZE := 1G
 
 QEMU_CPU := cortex-a72
-QEMU_MACHINE := virt,gic-version=3 -m 8G
+# Guest RAM. Override on the command line for small hosts, e.g.
+#   make run MEM=512M      (a t4g.micro has only 1 GiB — 8G fails to allocate)
+MEM ?= 8G
+QEMU_MACHINE := virt,gic-version=3 -m $(MEM)
 QEMU_DEVICES := -netdev user,id=n0 \
 	-device virtio-net-pci,netdev=n0,disable-legacy=on \
 	-device virtio-rng-pci,disable-legacy=on \
@@ -65,10 +68,15 @@ QEMU_DEVICES := -netdev user,id=n0 \
 # QEMU_MACHINE := virt,gic-version=3,virtualization=on,secure=on -m 8G
 QEMU_BASE := qemu-system-aarch64 -machine $(QEMU_MACHINE) -nographic -cpu $(QEMU_CPU) $(QEMU_DEVICES)
 
+# KVM variant: runs the guest on the real aarch64 host cores (-cpu host) instead
+# of emulating a Cortex-A72. On an aarch64 KVM host (e.g. AWS Graviton) this
+# makes PMCCNTR read TRUE silicon cycles. Requires /dev/kvm on an aarch64 host.
+QEMU_KVM_BASE := qemu-system-aarch64 -machine $(QEMU_MACHINE) -accel kvm -nographic -cpu host $(QEMU_DEVICES)
+
 QEMU_FLAGS_RUN   := -kernel $(TARGET)
 QEMU_FLAGS_DEBUG := -kernel $(TARGET) -s -S
 
-.PHONY: all run debug clean gdb tmux disk dump_dts compile_commands.json
+.PHONY: all run run-kvm debug clean gdb tmux disk dump_dts compile_commands.json
 
 
 all: $(TARGET)
@@ -127,6 +135,12 @@ user_bins: $(USER_BINS)
 # Run QEMU
 run: all disk
 	@$(QEMU_BASE) $(QEMU_FLAGS_RUN)
+
+# Run under KVM on an aarch64 host (guest executes on real cores, true-silicon
+# PMU). Example on AWS Graviton: make run-kvm MEM=512M
+run-kvm: all disk
+	@echo "Running under KVM (-cpu host). Requires /dev/kvm on an aarch64 host."
+	@$(QEMU_KVM_BASE) $(QEMU_FLAGS_RUN)
 
 debug: all disk
 	@$(QEMU_BASE) $(QEMU_FLAGS_DEBUG)

@@ -49,6 +49,21 @@ Completed extensions (implemented and tested under QEMU):
   > CPU freq == CNTFRQ (62.5 MHz). The cycle counts are real measured values
   > from the running emulator.
 
+  **Reproducing / measurement modes** — run the harness headlessly with
+  [scripts/run-bench.sh](scripts/run-bench.sh) (drives the `bench` shell
+  built-in over a FIFO; no source edits):
+
+  | Mode | Command | What the cycles mean |
+  |---|---|---|
+  | Deterministic (emulated) | `ICOUNT=1 ./scripts/run-bench.sh` | instruction-accurate, reproducible TCG cycle counts |
+  | Real-time (emulated) | `./scripts/run-bench.sh` | TCG cycle counts with run-to-run jitter |
+  | **True silicon** | `ACCEL=kvm MEM=512M CROSS_COMPILE= ./scripts/run-bench.sh` (or `make run-kvm`) | **real hardware cycles** — guest runs on the host's aarch64 cores via KVM (`-cpu host`); needs `/dev/kvm` on an aarch64 host (e.g. AWS Graviton) |
+
+  > Honest scope: the table above and the CI numbers are **emulated** (QEMU/TCG,
+  > guest is a virtual Cortex-A72). Running under QEMU on an ARM host does *not*
+  > by itself make them silicon numbers — only `ACCEL=kvm` / `make run-kvm`
+  > executes the guest on real cores for true-hardware PMU cycles.
+
 ### POSIX signal subsystem
 
 - **`sigaction`, `kill`, `sigprocmask`, `sigreturn`, `SIGALRM`**
