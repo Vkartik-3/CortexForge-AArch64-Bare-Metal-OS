@@ -64,6 +64,30 @@ Completed extensions (implemented and tested under QEMU):
   > by itself make them silicon numbers — only `ACCEL=kvm` / `make run-kvm`
   > executes the guest on real cores for true-hardware PMU cycles.
 
+  **Cross-host validation (AWS Graviton2)** — the harness was also run headless
+  on an AWS EC2 `t4g.micro` (Neoverse-N1 host, `aarch64`, `MEM=512M`) via
+  [scripts/run-bench.sh](scripts/run-bench.sh). These are **real-time QEMU/TCG**
+  means — still *emulated* (the guest is a virtual Cortex-A72; QEMU merely runs
+  on an ARM host) — so they carry run-to-run jitter and differ from the
+  deterministic `-icount` table above:
+
+  | Benchmark | Graviton2 real-time TCG, mean cycles |
+  |---|---|
+  | syscall_latency | ~4,200–4,500 |
+  | context_switch | ~1,100–1,240 |
+  | irq_latency | ~4,350 |
+  | signal_delivery | ~1,840–1,960 |
+  | sigreturn_latency | ~1,270–1,300 |
+  | uart_frame_encode | ~16,000–18,500 |
+  | crc16_64b | ~9,900 |
+  | crc16_256b | ~43,700–44,000 |
+
+  > True-silicon (KVM) numbers were **not** collected: standard EC2 Graviton VMs
+  > run on the Nitro hypervisor and do not expose `/dev/kvm` (see the
+  > "True silicon" row above), so `ACCEL=kvm` cannot run there — a Graviton
+  > `*.metal` instance would be required. Correct wording for these figures:
+  > *"CortexForge under QEMU TCG on an AWS Graviton2 host"* — not native/silicon.
+
 ### POSIX signal subsystem
 
 - **`sigaction`, `kill`, `sigprocmask`, `sigreturn`, `SIGALRM`**
