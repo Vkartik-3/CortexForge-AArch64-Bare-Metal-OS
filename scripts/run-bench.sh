@@ -42,6 +42,21 @@ if ! make >/dev/null 2>&1 || ! make disk >/dev/null 2>&1; then
 fi
 
 if [ "$ACCEL" = kvm ]; then
+  if [ ! -e /dev/kvm ]; then
+    echo "[run-bench] ERROR: ACCEL=kvm but /dev/kvm is not present."
+    echo "            Standard EC2 instances (e.g. t4g.micro) are themselves VMs on"
+    echo "            the Nitro hypervisor and do NOT expose /dev/kvm. For true-silicon"
+    echo "            PMU cycles, use a bare-metal aarch64 host — a Graviton *.metal"
+    echo "            instance such as c7g.metal / c6g.metal / m6g.metal / a1.metal —"
+    echo "            or run with ACCEL=tcg for emulated counts."
+    exit 1
+  fi
+  if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+    echo "[run-bench] ERROR: /dev/kvm exists but is not accessible."
+    echo "            Add your user to the 'kvm' group (sudo usermod -aG kvm \$USER;"
+    echo "            re-login) or run with sudo."
+    exit 1
+  fi
   ACCEL_ARGS="-accel kvm -cpu host"
   IC_ARGS=""
   echo "[run-bench] KVM: guest runs on real aarch64 cores (-cpu host) — true-silicon PMU"

@@ -57,7 +57,7 @@ Completed extensions (implemented and tested under QEMU):
   |---|---|---|
   | Deterministic (emulated) | `ICOUNT=1 ./scripts/run-bench.sh` | instruction-accurate, reproducible TCG cycle counts |
   | Real-time (emulated) | `./scripts/run-bench.sh` | TCG cycle counts with run-to-run jitter |
-  | **True silicon** | `ACCEL=kvm MEM=512M CROSS_COMPILE= ./scripts/run-bench.sh` (or `make run-kvm`) | **real hardware cycles** — guest runs on the host's aarch64 cores via KVM (`-cpu host`); needs `/dev/kvm` on an aarch64 host (e.g. AWS Graviton) |
+  | **True silicon** | `ACCEL=kvm MEM=512M CROSS_COMPILE= ./scripts/run-bench.sh` (or `make run-kvm`) | **real hardware cycles** — guest runs on the host's aarch64 cores via KVM (`-cpu host`); needs `/dev/kvm`, i.e. a **bare-metal** aarch64 host. Standard EC2 Graviton VMs (e.g. `t4g.micro`) are themselves guests and do *not* expose `/dev/kvm` — use a Graviton `*.metal` instance (c7g.metal, m6g.metal, a1.metal, …). |
 
   > Honest scope: the table above and the CI numbers are **emulated** (QEMU/TCG,
   > guest is a virtual Cortex-A72). Running under QEMU on an ARM host does *not*
