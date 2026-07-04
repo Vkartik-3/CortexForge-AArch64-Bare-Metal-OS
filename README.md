@@ -112,6 +112,11 @@ Completed extensions (implemented and tested under QEMU):
   test ([scripts/test-ebpf.sh](scripts/test-ebpf.sh)) reconfigures QEMU to TAP.
   Toolchain: `clang`, `libbpf-dev`, `bpftool`. **CI verifies compilation only**
   (running XDP needs root + a real interface).
+- **Verified on real Linux** (AWS EC2, Ubuntu 24.04, kernel 7.0.0-1006-aws,
+  SKB mode, `cfxtap0`): the monitor captured the guest's ICMP echo requests
+  (`src=10.0.2.15 dst=10.0.2.2 type=8`) at XDP ingress — **10/10 ICMP packets,
+  980 bytes, mean 98 B, `XDP_PASS` throughout, integration test PASS**. (Traffic
+  source is the guest's `netd` 5 s background pinger, so ~1 ICMP/5 s.)
 
 Licensed under GPL-3.0. See LICENSE file for details.
 

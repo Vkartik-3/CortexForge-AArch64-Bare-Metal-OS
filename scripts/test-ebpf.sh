@@ -25,7 +25,17 @@ GUEST_IP=10.0.2.15
 GUEST_MAC=52:54:00:12:34:56
 XDP_LOG=/tmp/cfx-xdp.log
 CON_LOG=/tmp/cfx-con.log
-PINGS=15
+# Guest RAM: the kernel maps 8 GiB, but it boots and runs networking fine with
+# less. Override MEM=512M on small hosts (e.g. a t3.micro with 1 GiB) where QEMU
+# can't reserve 8 GiB ("Cannot allocate memory").
+MEM=${MEM:-8G}
+# The dominant ICMP source is the guest's netd background pinger (one echo to
+# 10.0.2.2 every ~5 s), so we need a ~55 s capture window to observe >= 10. The
+# driven shell pings below are supplementary. PINGS * PING_INTERVAL + FINAL_WAIT
+# sets the window; defaults ~ 50 s.
+PINGS=${PINGS:-40}
+PING_INTERVAL=${PING_INTERVAL:-1}
+FINAL_WAIT=${FINAL_WAIT:-10}
 
 skip() { echo "[test-ebpf] SKIP: $*"; exit 0; }
 
@@ -71,7 +81,7 @@ trap cleanup EXIT
 
 # ---- boot QEMU on the TAP ----
 rm -f "$XDP_LOG" "$CON_LOG"
-qemu-system-aarch64 -machine virt,gic-version=3 -m 8G -nographic -cpu cortex-a72 \
+qemu-system-aarch64 -machine virt,gic-version=3 -m "$MEM" -nographic -cpu cortex-a72 \
   -netdev tap,id=n0,ifname="$TAP",script=no,downscript=no \
   -device virtio-net-pci,netdev=n0,mac="$GUEST_MAC",disable-legacy=on \
   -device virtio-rng-pci,disable-legacy=on \
@@ -92,10 +102,11 @@ for _ in $(seq 1 10); do grep -q "attached to $TAP" "$XDP_LOG" && break; sleep 0
 grep -q "attached to $TAP" "$XDP_LOG" || { echo "[test-ebpf] FAIL: XDP attach failed"; cat "$XDP_LOG"; exit 1; }
 echo "[test-ebpf] XDP attached; driving $PINGS guest pings to $HOST_IP"
 
-# ---- generate ICMP: drive the guest shell to ping the host TAP ----
+# ---- generate ICMP: drive the guest shell to ping the host TAP, and let the
+# netd background pinger (every ~5 s) accumulate over the window ----
 sleep 2
-for _ in $(seq 1 "$PINGS"); do printf 'ping\n' >&3; sleep 0.6; done
-sleep 3
+for _ in $(seq 1 "$PINGS"); do printf 'ping\n' >&3; sleep "$PING_INTERVAL"; done
+sleep "$FINAL_WAIT"
 
 # ---- stop monitor to flush its FINAL summary, then evaluate ----
 kill -INT "$MON_PID" 2>/dev/null; sleep 1
