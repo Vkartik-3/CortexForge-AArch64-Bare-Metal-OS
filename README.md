@@ -12,7 +12,9 @@ The original copyright and license notices remain intact.
 
 ## Planned Extensions
 
-All five planned extensions are complete (see below).
+All five planned extensions are complete, plus a bonus **RTOS-style real-time
+scheduler** (fixed-priority preemption, periodic tasks, priority inheritance,
+high-resolution timer) — see below.
 
 ## Contributions by Kartik Vadhawana
 
@@ -34,7 +36,7 @@ Completed extensions (implemented and tested under QEMU):
   | Benchmark | Cycles | ns @62.5 MHz (nominal) |
   |---|---|---|
   | Null syscall round-trip (`svc`→dispatch→`eret`) | 299 | 4,784 |
-  | Context switch (round-trip; ~131/switch) | 261 | 4,176 |
+  | Context switch (round-trip; O(n) fixed-priority selection) | 458 | 7,328 |
   | Timer IRQ deadline→handler entry | 6 ticks | 96 |
   | Signal delivery (pending→handler-ready) | 653 | 10,448 |
   | Signal return (`sigreturn` context restore) | 434 | 6,944 |
@@ -156,6 +158,45 @@ Completed extensions (implemented and tested under QEMU):
   (`src=10.0.2.15 dst=10.0.2.2 type=8`) at XDP ingress — **10/10 ICMP packets,
   980 bytes, mean 98 B, `XDP_PASS` throughout, integration test PASS**. (Traffic
   source is the guest's `netd` 5 s background pinger, so ~1 ICMP/5 s.)
+
+### RTOS-style real-time scheduler (bonus)
+
+Turned the round-robin scheduler into a **fixed-priority preemptive real-time
+scheduler** ([src/sched/sched.c](src/sched/sched.c),
+[src/sched/rtos.c](src/sched/rtos.c)):
+
+- **Phase 1 — fixed-priority preemption + periodic tasks.** `schedule()` picks
+  the highest-priority runnable task (round-robin within a level).
+  `rt_create_periodic(entry, priority, period_us, deadline_us)` releases a task
+  each period; `rt_wait_next_period()` records the job's **response time**,
+  **WCRT**, and **deadline misses** (timed with `CNTPCT_EL0`).
+- **Phase 2 — blocking primitives + priority inheritance.** `rt_mutex` /
+  `rt_sem` with a `TASK_BLOCKED` state and priority-ordered wait queues. On
+  contention the mutex **boosts the owner** to the blocked waiter's priority
+  (bounded chain propagation), preventing unbounded priority inversion; the
+  boost is undone on release. Verified by the `pidemo` command (low holds a
+  mutex, high blocks → `priority inheritance: 'pi_low' boosted to 20`).
+- **Phase 3 — high-resolution (tickless) timer.** The generic-timer one-shot
+  now fires at the *sooner* of the next 10 ms scheduler tick or the next RT
+  release, so periods **below the tick** work. A 5 ms task (200 Hz) runs
+  correctly — impossible with the fixed 10 ms tick.
+
+Measured with the `rt` shell command under `-icount` (deterministic; warm-up
+job excluded). Rate-monotonic priorities, **0 deadline misses**, worst-case
+response time rising as priority falls (textbook fixed-priority behavior):
+
+  | Task | Period | Priority | WCRT | Deadline misses |
+  |---|---|---|---|---|
+  | rt_fast | 5 ms | 35 (highest) | **4 µs** | 0 |
+  | rt_hi | 100 ms | 30 | 16 µs | 0 |
+  | rt_mid | 200 ms | 20 | 32 µs | 0 |
+  | rt_lo | 500 ms | 12 | 64 µs | 0 |
+
+  > Same honesty caveat as the PMU benchmarks: real-time *timing* is only
+  > meaningful under `-icount` (deterministic) or on real hardware — plain
+  > real-time QEMU/TCG adds host-scheduling jitter. This is a **real-time /
+  > RTOS-style scheduler**, not a certified/hard RTOS. Shell demos: `rtdemo`,
+  > `rt`, `pidemo`.
 
 Licensed under GPL-3.0. See LICENSE file for details.
 

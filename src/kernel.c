@@ -170,6 +170,13 @@ static inline int64_t sys_bench(void) {
   return x0;
 }
 
+static inline int64_t sys_rt(uint64_t op) {
+  register uint64_t x0 __asm__("x0") = op;
+  register uint64_t x8 __asm__("x8") = 21; /* SYS_RT */
+  __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x8) : "memory");
+  return (int64_t)x0;
+}
+
 /* ----------------------------------------------------------------
  * Tiny EL0 user-space helpers used by task_shell. Defined inline
  * because user-space cannot call into the kernel string library.
@@ -261,6 +268,9 @@ static void sh_help(void) {
       "  cpuinfo         - cat /proc/cpuinfo (MIDR / cache / features / cycles)\n"
       "  stack           - stress test demand-paged user stack growth\n"
       "  bench           - PMU cycle-level latency benchmarks (syscall/ctxsw/irq)\n"
+      "  rtdemo          - spawn periodic real-time tasks (rt_hi/rt_mid/rt_lo)\n"
+      "  rt              - show real-time scheduling stats (WCRT / deadline misses)\n"
+      "  pidemo          - priority-inversion demo (shows priority inheritance)\n"
       "  cat <path>      - print a file\n"
       "  hexdump <path>  - hex+ascii dump of a file\n"
       "  echo <text>     - print text\n"
@@ -599,6 +609,12 @@ static void task_shell(void) {
        * which is not enabled at EL0, so this traps into the kernel via
        * SYS_BENCH; all [BENCH] output is printed from EL1. */
       sys_bench();
+    } else if (u_streq(line, "rtdemo")) {
+      sys_rt(0); /* spawn periodic RT demo tasks */
+    } else if (u_streq(line, "rt")) {
+      sys_rt(1); /* print RT scheduling stats */
+    } else if (u_streq(line, "pidemo")) {
+      sys_rt(2); /* run the priority-inversion / inheritance demo */
     } else if (u_starts_with(line, "./")) {
       /* Convenience launcher: "./name" -> exec "/mnt/fat32/NAME.ELF" (the
        * FAT32 volume is mounted there and stores user binaries upper-cased).

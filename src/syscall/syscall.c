@@ -12,6 +12,7 @@
 #include "strings/strings.h"
 #include "bench/bench.h"
 #include "signal.h"
+#include "sched/rtos.h"
 #include "elf.h"
 
 #include <stddef.h>
@@ -552,6 +553,32 @@ void syscall_dispatch(trap_frame_t *frame) {
      * ioctl handler is responsible for validating pointer args). */
     if (fds) {
       ret = fd_ioctl(fds, (int)arg0, arg1, arg2);
+    }
+    break;
+
+  case SYS_RT:
+    /* Real-time scheduler control (runs at EL1). arg0 = op. */
+    switch (arg0) {
+    case 0:
+      rt_demo_start();
+      ret = 0;
+      break;
+    case 1: {
+      char rtbuf[1024];
+      int n = rt_render_stats(rtbuf, sizeof(rtbuf) - 1);
+      if (n < 0) n = 0;
+      rtbuf[n] = '\0';
+      uart_puts(rtbuf);
+      ret = 0;
+      break;
+    }
+    case 2:
+      rt_pi_demo_start();
+      ret = 0;
+      break;
+    default:
+      ret = -1;
+      break;
     }
     break;
 

@@ -2,6 +2,7 @@
 #include "bench/bench.h"
 #include "gic/gic.h"
 #include "sched/sched.h"
+#include "sched/rtos.h"
 #include "signal.h"
 #include "uart/uart.h"
 
@@ -11,6 +12,11 @@ static volatile uint64_t timer_freq = 0;
 static volatile uint64_t timer_interval = 0;
 static volatile uint64_t tick_count = 0;
 static volatile timer_callback_t tick_callback = 0;
+/* Absolute CNTPCT of the next scheduler-tick boundary. With the Phase-3 dynamic
+ * (tickless) timer the one-shot may fire EARLIER than this to release a periodic
+ * RT task; g_next_tick keeps the 10 ms scheduler cadence (sleep/alarm/uptime)
+ * independent of those early RT firings. */
+static volatile uint64_t g_next_tick = 0;
 
 void timer_init() {
   uart_println("[TIMER] Initializing hardware timer");
@@ -43,8 +49,9 @@ void timer_start(uint64_t interval_ms) {
   // CNTPCT_EL0 by the timer; once they cross, the IRQ fires.
   uint64_t now;
   __asm__ __volatile__("mrs %0, cntpct_el0" : "=r"(now));
+  g_next_tick = now + timer_interval;
   __asm__ __volatile__(
-      "msr cntp_cval_el0, %0" ::"r"(now + timer_interval));    // Deadline
+      "msr cntp_cval_el0, %0" ::"r"(g_next_tick));             // Deadline
   __asm__ __volatile__("msr cntp_ctl_el0, %0" ::"r"(1ULL));    // Enable
 
   uart_println("[TIMER] Started!");
@@ -67,31 +74,47 @@ void timer_handle_irq() {
     bench_irq_sample(now_pct - fired_deadline);
   }
 
-  tick_count++;
+  uint64_t now;
+  __asm__ __volatile__("mrs %0, cntpct_el0" : "=r"(now));
 
-  // Re-arm by advancing the absolute deadline. This drifts at most one
-  // interval per IRQ no matter how long handler latency takes; using
-  // CNTP_TVAL_EL0 here would reset the countdown from "now" and accumulate.
-  uint64_t cval;
-  __asm__ __volatile__("mrs %0, cntp_cval_el0" : "=r"(cval));
-  cval += timer_interval;
-  __asm__ __volatile__("msr cntp_cval_el0, %0" ::"r"(cval));
+  // Scheduler tick: only when a 10 ms (timer_interval) boundary has been
+  // reached. Early one-shot firings for RT releases skip this so sleep/alarm/
+  // uptime stay on the fixed cadence.
+  if (now >= g_next_tick) {
+    tick_count++;
+    g_next_tick += timer_interval;
 
-  // Wake any tasks whose sleep deadline has passed
-  sched_wake_sleepers();
+    sched_wake_sleepers();   // wake tasks whose sleep deadline passed
+    signal_tick_alarms();    // decrement per-task SIGALRM countdowns
 
-  // Decrement per-task SIGALRM countdowns; expiry sets SIGALRM pending, which
-  // is delivered when the target task next returns to EL0.
-  signal_tick_alarms();
-
-  if (tick_callback) {
-    tick_callback();
-  } else {
-    // Only log every 100 ticks (1 second at 10ms interval) to avoid spam
-    if (tick_count % 100 == 0) {
+    if (tick_callback) {
+      tick_callback();
+    } else if (tick_count % 100 == 0) {
       uart_printf("[TIMER] tick %u\n", tick_count);
     }
   }
+
+  // Release any periodic RT tasks whose CNTPCT deadline has arrived; returns
+  // the soonest still-pending release (0 if none).
+  uint64_t rt_earliest = rt_tick_release();
+
+  // Program the next one-shot deadline: the sooner of the next scheduler tick
+  // and the next RT release (dynamic/tickless timer). Guard against a deadline
+  // already in the past so we never spin re-firing immediately.
+  uint64_t next_ev = g_next_tick;
+  if (rt_earliest != 0 && rt_earliest < next_ev) {
+    next_ev = rt_earliest;
+  }
+  uint64_t now2;
+  __asm__ __volatile__("mrs %0, cntpct_el0" : "=r"(now2));
+  uint64_t slack = timer_interval / 100;
+  if (slack == 0) {
+    slack = 1;
+  }
+  if (next_ev <= now2) {
+    next_ev = now2 + slack;
+  }
+  __asm__ __volatile__("msr cntp_cval_el0, %0" ::"r"(next_ev));
 }
 
 void timer_set_callback(timer_callback_t cb) { tick_callback = cb; }

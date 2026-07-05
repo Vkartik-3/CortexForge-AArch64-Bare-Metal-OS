@@ -151,6 +151,7 @@ int sched_create_kernel_task(const char *name, task_entry_t entry) {
     return -1;
   }
   memset(t, 0, sizeof(task_t));
+  t->priority = t->base_priority = PRIO_DEFAULT; /* idle stays PRIO_IDLE (0) */
 
   uintptr_t kstack_phys = pmm_allocate_pages(TASK_STACK_PAGES);
   if (!kstack_phys) {
@@ -204,6 +205,7 @@ int sched_create_task(const char *name, task_entry_t entry) {
     return -1;
   }
   memset(t, 0, sizeof(task_t));
+  t->priority = t->base_priority = PRIO_DEFAULT; /* idle stays PRIO_IDLE (0) */
 
   // Kernel stack (used during exceptions and context_switch)
   uintptr_t kstack_phys = pmm_allocate_pages(TASK_STACK_PAGES);
@@ -349,6 +351,7 @@ int sched_fork(task_t *parent, struct trap_frame *frame) {
     return -1;
   }
   memset(t, 0, sizeof(task_t));
+  t->priority = t->base_priority = PRIO_DEFAULT; /* idle stays PRIO_IDLE (0) */
 
   /* Child kernel stack. */
   uintptr_t kstack_phys = pmm_allocate_pages(TASK_STACK_PAGES);
@@ -472,35 +475,41 @@ int sched_fork(task_t *parent, struct trap_frame *frame) {
 }
 
 
+/* Fixed-priority preemptive scheduler with round-robin within a priority
+ * level. Selects the highest-priority runnable task; among equal top-priority
+ * tasks the scan starts at prev->next and uses a strict '>' comparison, so the
+ * runnable task closest *after* prev at that level wins — giving round-robin
+ * time-slicing at the top level while never starving a higher priority. The
+ * idle task (PRIO_IDLE = 0, always READY) is the guaranteed fallback. */
 void schedule(void) {
   sched_reap();
 
   task_t *prev = current;
-  task_t *next = prev->next;
-  task_t *fallback = (void *)0; // idle fallback
 
-  while (next != prev) {
-    if (next->state == TASK_READY) {
-      if (next == &idle_task) {
-        if (!fallback) {
-          fallback = next;
-        }
-        next = next->next;
-        continue;
-      }
-      break;
+  /* Pick the highest-priority runnable task. A task is runnable if it is READY,
+   * or if it is prev and still RUNNING (prev hasn't blocked/slept/exited). */
+  task_t *best     = &idle_task;
+  int     best_pri = -1;
+  task_t *t        = prev->next;
+  do {
+    int runnable = (t->state == TASK_READY) ||
+                   (t == prev && t->state == TASK_RUNNING);
+    if (runnable && (int)t->priority > best_pri) {
+      best_pri = (int)t->priority;
+      best     = t;
     }
-    next = next->next;
-  }
+    t = t->next;
+  } while (t != prev->next);
+
+  task_t *next = best;
 
   if (next == prev) {
-    // prev is still runnable — no point switching to idle, let it keep its
-    // timeslice
-    if (!fallback || prev->state == TASK_RUNNING) {
-      return;
+    /* Staying on prev. If it's still RUNNING there's nothing to do; if it was
+     * selected while merely READY (can't normally happen), promote it. */
+    if (prev->state != TASK_RUNNING) {
+      prev->state = TASK_RUNNING;
     }
-    // prev is dead/blocked — must switch to idle
-    next = fallback;
+    return;
   }
 
   if (prev->state == TASK_RUNNING) {
@@ -523,6 +532,37 @@ void schedule(void) {
   current = next;
 
   context_switch(prev, next);
+}
+
+/* ---- RTOS scheduling helpers ------------------------------------------- */
+
+void sched_set_priority(task_t *t, uint8_t prio) {
+  if (t) {
+    t->priority = prio;
+  }
+}
+
+void sched_make_ready(task_t *t) {
+  if (t && t->state != TASK_DEAD) {
+    t->state = TASK_READY;
+  }
+}
+
+void sched_block_current(void) {
+  current->state = TASK_BLOCKED;
+  schedule();
+}
+
+int sched_create_rt_task(const char *name, task_entry_t entry, uint8_t priority) {
+  int pid = sched_create_kernel_task(name, entry);
+  if (pid < 0) {
+    return -1;
+  }
+  task_t *t = sched_find_task((uint64_t)pid);
+  if (t) {
+    t->priority = t->base_priority = priority;
+  }
+  return pid;
 }
 
 void yield(void) {
@@ -627,7 +667,11 @@ void sched_wake_sleepers(void) {
   task_t *t = idle_task.next;
 
   while (t != &idle_task) {
-    if (t->state == TASK_SLEEPING && now >= t->sleep_until) {
+    /* Periodic RT tasks (rt_period_cyc > 0) also park in TASK_SLEEPING between
+     * jobs, but they are released by rt_tick_release() against their CNTPCT
+     * deadline — skip them here so a stale sleep_until can't wake them early. */
+    if (t->state == TASK_SLEEPING && t->rt_period_cyc == 0 &&
+        now >= t->sleep_until) {
       t->state = TASK_READY;
       t->sleep_until = 0;
     }

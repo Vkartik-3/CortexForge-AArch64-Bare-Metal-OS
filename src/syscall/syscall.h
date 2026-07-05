@@ -26,6 +26,8 @@
 #define SYS_SIGPROCMASK 18 /* arg0 = how, arg1 = set*, arg2 = oldset*; returns 0/-1 */
 #define SYS_ALARM       19 /* arg0 = seconds; returns previous alarm seconds */
 #define SYS_IOCTL       20 /* arg0 = fd, arg1 = cmd, arg2 = arg; device-defined */
+#define SYS_RT          21 /* arg0 = op: 0=start periodic demo, 1=print stats,
+                              2=start priority-inversion demo */
 
 /* SYS_BALLOON sub-operations. Inflate/deflate hand pages to/from the host
  * via virtio-balloon; status returns the current size (op=2) or the host's

@@ -22,10 +22,18 @@ typedef enum {
   TASK_READY,
   TASK_RUNNING,
   TASK_SLEEPING,
-  TASK_DEAD
+  TASK_DEAD,
+  TASK_BLOCKED   /* blocked on an rt_mutex / rt_sem (Phase 2) */
 } task_state_t;
 
 typedef void (*task_entry_t)(void);
+
+/* Fixed-priority scheduling: HIGHER number = HIGHER priority (FreeRTOS-style).
+ * The idle task is PRIO_IDLE (0); ordinary tasks default to PRIO_DEFAULT;
+ * real-time periodic tasks pass an explicit priority up to PRIO_MAX. */
+#define PRIO_IDLE    0
+#define PRIO_DEFAULT 8
+#define PRIO_MAX     255
 
 typedef struct task {
   uint64_t sp; // offset 0: kernel SP (context_switch saves/restores here)
@@ -66,6 +74,24 @@ typedef struct task {
   uint32_t sig_pending;
   uint32_t sig_blocked;
   uint64_t sig_alarm_ticks;
+
+  /* ---- RTOS scheduling (real-time extension) — appended at the END so the
+   * switch.S TASK_SP=0 / TASK_TTBR0=40 offsets are unaffected.
+   * priority is the EFFECTIVE priority the scheduler uses (may be temporarily
+   * raised by priority inheritance); base_priority is the nominal value it is
+   * restored to. Periodic-task timing uses the CNTPCT counter (rt_*_cyc). */
+  uint8_t  priority;
+  uint8_t  base_priority;
+  uint64_t rt_period_cyc;     /* period in CNTPCT ticks (0 = not periodic)    */
+  uint64_t rt_deadline_cyc;   /* relative deadline in CNTPCT ticks            */
+  uint64_t rt_next_release;   /* absolute CNTPCT of the next release          */
+  uint64_t rt_release_cyc;    /* CNTPCT at the current release (for response) */
+  uint64_t rt_wcrt_cyc;       /* worst-case response time observed (CNTPCT)   */
+  uint64_t rt_last_resp_cyc;  /* last job's response time (CNTPCT)            */
+  uint32_t rt_activations;    /* number of releases                          */
+  uint32_t rt_deadline_misses;
+  struct task *wait_next;     /* link in an rt_mutex / rt_sem wait queue      */
+  void *blocked_on;           /* rt_mutex_t* the task is blocked on (PI chains)*/
 } task_t;
 
 // switch.S
@@ -136,5 +162,21 @@ uint16_t sched_asid_alloc(void);
  * task), 0 on failure (caller should fall through to the fault dump). */
 int sched_try_grow_stack(task_t *t, uint64_t far);
 
+/* ---- RTOS scheduling helpers (real-time extension) --------------------- */
+
+/* Create an EL1 kernel task with an explicit fixed priority (higher = more
+ * urgent). Returns pid, or -1. Used by the periodic-task factory. */
+int sched_create_rt_task(const char *name, task_entry_t entry, uint8_t priority);
+
+/* Set a task's EFFECTIVE priority (base_priority is left untouched). Used by
+ * priority inheritance to boost a mutex owner. */
+void sched_set_priority(task_t *t, uint8_t prio);
+
+/* Block the current task (TASK_BLOCKED) and switch away; returns once another
+ * path makes it READY again. */
+void sched_block_current(void);
+
+/* Transition a blocked/sleeping task back to READY (does not switch). */
+void sched_make_ready(task_t *t);
 
 #endif
