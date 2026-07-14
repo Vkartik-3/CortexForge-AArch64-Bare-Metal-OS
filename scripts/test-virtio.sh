@@ -157,6 +157,22 @@ sleep 3
 grep -qaiE "\[BALLOON\].*(inflate|actual)" "$LOG" || fail "balloon: no inflate response"
 pass "balloon: inflate/deflate completed"
 
+# ---- blk: data-integrity self-test (multi-sector, flush, bounds) ----
+# Writes a position-dependent pattern to a scratch region at the END of the
+# device (clear of the mounted FAT32 filesystem — sector 0 is the BPB), reads
+# it back as one multi-sector request, and compares byte-for-byte.
+printf 'blktest\n' >&3
+blktest_ok=0
+for ((i = 0; i < 30; i++)); do
+  grep -qaE "\[BLKTEST\] (ALL PASS|FAILURES)" "$LOG" && { blktest_ok=1; break; }
+  kill -0 "$QEMU_PID" 2>/dev/null || break
+  sleep 1
+done
+[ "$blktest_ok" -eq 1 ] || fail "blk: self-test did not complete"
+grep -qaF "[BLKTEST] ALL PASS" "$LOG" \
+  || fail "blk: self-test reported failures$(grep -aE '\[BLKTEST\] (FAIL|mismatch)' "$LOG" | sed 's/^/\n    /')"
+pass "blk: data-integrity self-test (multi-sector + flush + bounds) ALL PASS"
+
 # ---- final sweep: nothing wedged or corrupted during the run ----
 if grep -qaE "virtqueue_poll: timeout|queue full|PANIC|panic" "$LOG"; then
   fail "virtqueue timeout / panic during device exercise"

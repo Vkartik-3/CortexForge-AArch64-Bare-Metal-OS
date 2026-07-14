@@ -11,6 +11,7 @@
 #include "mm/pmm/pmm.h"
 #include "strings/strings.h"
 #include "bench/bench.h"
+#include "pci/virtio/blk/blk_test.h"
 #include "signal.h"
 #include "sched/rtos.h"
 #include "elf.h"
@@ -524,6 +525,13 @@ void syscall_dispatch(trap_frame_t *frame) {
     /* Run the PMU benchmark harness at EL1 (PMCCNTR_EL0 is not EL0-readable).
      * No arguments; prints [BENCH] result lines to the console and returns 0. */
     bench_run();
+    ret = 0;
+    break;
+
+  case SYS_BLKTEST:
+    /* Run the virtio-blk data-integrity self-test at EL1 (the driver and its
+     * DMA buffers are kernel-only). Prints [BLKTEST] lines and returns 0. */
+    blk_selftest();
     ret = 0;
     break;
 

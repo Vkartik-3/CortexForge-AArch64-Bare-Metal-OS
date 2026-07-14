@@ -22,7 +22,7 @@ static uint32_t fat_next(uint32_t cluster) {
   uint32_t fat_offset = cluster * 4;
   uint32_t sector = vol.fat_start_sector + fat_offset / SECTOR;
   uint32_t offset = fat_offset % SECTOR;
-  if (blk_read(sector, sec_buf) != ESUCCESS) {
+  if (blk_read(sector, sec_buf, 1) != ESUCCESS) {
     return FAT32_EOC;
   }
   uint32_t val;
@@ -58,7 +58,7 @@ static void to_83(const char *name, uint8_t out[11]) {
 }
 
 int fat32_mount(void) {
-  if (blk_read(0, sec_buf) != ESUCCESS) {
+  if (blk_read(0, sec_buf, 1) != ESUCCESS) {
     uart_errorln("[FS][FAT32] Failed to read BPB");
     return EERROR;
   }
@@ -98,7 +98,7 @@ static int dir_lookup(uint32_t dir_cluster, const uint8_t target[11],
   while (cluster < FAT32_EOC) {
     uint32_t base = cluster_to_sector(cluster);
     for (uint32_t s = 0; s < vol.sectors_per_cluster; s++) {
-      if (blk_read(base + s, sec_buf) != ESUCCESS) {
+      if (blk_read(base + s, sec_buf, 1) != ESUCCESS) {
         return EERROR;
       }
       for (uint32_t off = 0; off < SECTOR; off += DIR_ENTRY_SIZE) {
@@ -198,7 +198,7 @@ static int fat_write(uint32_t cluster, uint32_t value) {
   uint32_t fat_offset = cluster * 4;
   uint32_t sector = vol.fat_start_sector + fat_offset / SECTOR;
   uint32_t offset = fat_offset % SECTOR;
-  if (blk_read(sector, sec_buf) != ESUCCESS) {
+  if (blk_read(sector, sec_buf, 1) != ESUCCESS) {
     return EERROR;
   }
   /* Preserve upper 4 bits of existing entry */
@@ -206,7 +206,7 @@ static int fat_write(uint32_t cluster, uint32_t value) {
   memcpy(&existing, sec_buf + offset, 4);
   value = (existing & 0xF0000000) | (value & 0x0FFFFFFF);
   memcpy(sec_buf + offset, &value, 4);
-  if (blk_write(sector, sec_buf) != ESUCCESS) {
+  if (blk_write(sector, sec_buf, 1) != ESUCCESS) {
     return EERROR;
   }
   return ESUCCESS;
@@ -224,7 +224,7 @@ static uint32_t fat_alloc_cluster(void) {
       break; /* past end of FAT */
     }
     uint32_t offset = fat_offset % SECTOR;
-    if (blk_read(sector, sec_buf) != ESUCCESS) {
+    if (blk_read(sector, sec_buf, 1) != ESUCCESS) {
       return 0;
     }
     uint32_t val;
@@ -248,14 +248,14 @@ static int dir_add_entry(uint32_t dir_cluster, const struct dir_entry *entry) {
   while (cluster < FAT32_EOC) {
     uint32_t base = cluster_to_sector(cluster);
     for (uint32_t s = 0; s < vol.sectors_per_cluster; s++) {
-      if (blk_read(base + s, sec_buf) != ESUCCESS) {
+      if (blk_read(base + s, sec_buf, 1) != ESUCCESS) {
         return EERROR;
       }
       for (uint32_t off = 0; off < SECTOR; off += DIR_ENTRY_SIZE) {
         uint8_t first = sec_buf[off];
         if (first == 0x00 || first == 0xE5) {
           memcpy(sec_buf + off, entry, DIR_ENTRY_SIZE);
-          if (blk_write(base + s, sec_buf) != ESUCCESS) {
+          if (blk_write(base + s, sec_buf, 1) != ESUCCESS) {
             return EERROR;
           }
           return ESUCCESS;
@@ -284,7 +284,7 @@ static int cluster_write_data(uint32_t first_cluster, const void *data,
       } else {
         memcpy(sec_buf, src, SECTOR);
       }
-      if (blk_write(base + s, sec_buf) != ESUCCESS) {
+      if (blk_write(base + s, sec_buf, 1) != ESUCCESS) {
         return EERROR;
       }
       uint32_t chunk = remaining < SECTOR ? remaining : SECTOR;
@@ -432,7 +432,7 @@ int fat32_read(uint32_t first_cluster, uint32_t size, void *buf,
   while (remaining > 0 && cluster < FAT32_EOC) {
     uint32_t base = cluster_to_sector(cluster);
     for (uint32_t s = 0; s < vol.sectors_per_cluster && remaining > 0; s++) {
-      if (blk_read(base + s, sec_buf) != ESUCCESS) {
+      if (blk_read(base + s, sec_buf, 1) != ESUCCESS) {
         return -1;
       }
       uint32_t chunk = remaining < SECTOR ? remaining : SECTOR;

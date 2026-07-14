@@ -28,6 +28,8 @@
 #define SYS_IOCTL       20 /* arg0 = fd, arg1 = cmd, arg2 = arg; device-defined */
 #define SYS_RT          21 /* arg0 = op: 0=start periodic demo, 1=print stats,
                               2=start priority-inversion demo */
+#define SYS_BLKTEST     22 /* runs the EL1 virtio-blk data-integrity self-test;
+                              returns 0 */
 
 /* SYS_BALLOON sub-operations. Inflate/deflate hand pages to/from the host
  * via virtio-balloon; status returns the current size (op=2) or the host's

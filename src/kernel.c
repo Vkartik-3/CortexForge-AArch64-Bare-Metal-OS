@@ -170,6 +170,13 @@ static inline int64_t sys_bench(void) {
   return x0;
 }
 
+static inline int64_t sys_blktest(void) {
+  register int64_t x0 __asm__("x0");
+  register uint64_t x8 __asm__("x8") = 22; /* SYS_BLKTEST */
+  __asm__ __volatile__("svc #0" : "=r"(x0) : "r"(x8) : "memory");
+  return x0;
+}
+
 static inline int64_t sys_rt(uint64_t op) {
   register uint64_t x0 __asm__("x0") = op;
   register uint64_t x8 __asm__("x8") = 21; /* SYS_RT */
@@ -268,6 +275,7 @@ static void sh_help(void) {
       "  cpuinfo         - cat /proc/cpuinfo (MIDR / cache / features / cycles)\n"
       "  stack           - stress test demand-paged user stack growth\n"
       "  bench           - PMU cycle-level latency benchmarks (syscall/ctxsw/irq)\n"
+      "  blktest         - virtio-blk data-integrity self-test (multi-sector, flush)\n"
       "  rtdemo          - spawn periodic real-time tasks (rt_hi/rt_mid/rt_lo)\n"
       "  rt              - show real-time scheduling stats (WCRT / deadline misses)\n"
       "  pidemo          - priority-inversion demo (shows priority inheritance)\n"
@@ -609,6 +617,10 @@ static void task_shell(void) {
        * which is not enabled at EL0, so this traps into the kernel via
        * SYS_BENCH; all [BENCH] output is printed from EL1. */
       sys_bench();
+    } else if (u_streq(line, "blktest")) {
+      /* virtio-blk data-integrity self-test. Runs at EL1 via SYS_BLKTEST:
+       * the block driver and its DMA buffers are kernel-only. */
+      sys_blktest();
     } else if (u_streq(line, "rtdemo")) {
       sys_rt(0); /* spawn periodic RT demo tasks */
     } else if (u_streq(line, "rt")) {

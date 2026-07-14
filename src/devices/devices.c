@@ -118,12 +118,10 @@ static int blk_dev_read(vnode_t *n, file_t *f, void *buf, size_t count) {
 
   size_t sectors = count / SECTOR;
   uint64_t sector = (uint64_t)f->offset / SECTOR;
-  uint8_t *p = buf;
 
-  for (size_t i = 0; i < sectors; i++) {
-    if (blk_read(sector + i, p + i * SECTOR) != ESUCCESS) {
-      return -1;
-    }
+  /* One multi-sector request; the driver splits it to fit seg_max/size_max. */
+  if (blk_read(sector, buf, (uint32_t)sectors) != ESUCCESS) {
+    return -1;
   }
 
   f->offset += (int64_t)count;
@@ -138,12 +136,10 @@ static int blk_dev_write(vnode_t *n, file_t *f, const void *buf, size_t count) {
 
   size_t sectors = count / SECTOR;
   uint64_t sector = (uint64_t)f->offset / SECTOR;
-  const uint8_t *p = buf;
 
-  for (size_t i = 0; i < sectors; i++) {
-    if (blk_write(sector + i, p + i * SECTOR) != ESUCCESS) {
-      return -1;
-    }
+  /* One multi-sector request; the driver splits it to fit seg_max/size_max. */
+  if (blk_write(sector, buf, (uint32_t)sectors) != ESUCCESS) {
+    return -1;
   }
 
   f->offset += (int64_t)count;
