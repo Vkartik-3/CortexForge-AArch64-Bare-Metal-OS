@@ -1,0 +1,29 @@
+virtio-blk benchmark — CortexForge
+QEMU:    QEMU emulator version 11.0.2
+Machine: virt,gic-version=3  CPU: cortex-a72  MEM: 2G
+Backend: QEMU virtio-blk-pci over a host raw file (page-cached),
+         NOT physical storage. Useful for comparing driver paths
+         (polling vs IRQ, QD=1 vs QD=32), not as disk numbers.
+
+[BLK] ===== virtio-blk benchmark =====
+[BLK] clock: CNTPCT_EL0 @ 62500000 Hz (from CNTFRQ_EL0) — NOT the PMU cycle counter (TCG does not model real cycles)
+[BLK] iters: 500 per small op, 100 per 64KB op, 100 flushes
+[BLK] scratch: sectors 1966080..2097151 (64 MiB, clear of FAT32)
+[BLK] latencies INCLUDE per-request driver setup (chain build + doorbell + completion reap)
+[BLK] mode: polling; seg_max=254 size_max=4294967295
+[BLK] seq_read_512b    IOPS=56287  p50=12us  p99=29us  p999=786us
+[BLK] seq_write_512b   IOPS=79164  p50=12us  p99=17us  p999=33us
+[BLK] seq_read_4kb     IOPS=75688  throughput=310 MB/s  p50=12us  p99=36us
+[BLK] seq_write_4kb    IOPS=78419  throughput=321 MB/s  p50=12us  p99=17us
+[BLK] seq_read_64kb    IOPS=27389  throughput=1795 MB/s  p50=15us  p99=471us
+[BLK] seq_write_64kb   IOPS=64641  throughput=4236 MB/s  p50=15us  p99=19us
+[BLK] rand_read_4kb    IOPS=40518  p50=13us  p99=160us  p999=381us
+[BLK] rand_write_4kb   IOPS=10145  p50=107us  p99=471us  p999=1095us
+[BLK] flush            lat=7us  p99=7351us
+[BLK] polling_mode QD=1 seq_read_4kb IOPS=84090  p50=12us  p99=17us  p999=18us
+[BLK] irq_mode     QD=1 seq_read_4kb IOPS=68842  p50=14us  p99=21us  p999=30us
+[BLK] queue_depth=1   seq_read_4kb IOPS=47292  throughput=193 MB/s  batch_p50=20us  batch_p99=24us
+[BLK] queue_depth=4   seq_read_4kb IOPS=177422  throughput=726 MB/s  batch_p50=22us  batch_p99=27us
+[BLK] queue_depth=16   seq_read_4kb IOPS=543293  throughput=2225 MB/s  batch_p50=29us  batch_p99=36us
+[BLK] queue_depth=32   seq_read_4kb IOPS=787401  throughput=3225 MB/s  batch_p50=39us  batch_p99=69us
+[BLK] ===== benchmark done =====

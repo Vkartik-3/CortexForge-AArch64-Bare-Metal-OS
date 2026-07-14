@@ -66,6 +66,72 @@ jobs:
             build/serial-uart.log
           if-no-files-found: warn
 
+  # virtio-blk storage datapath. Boots the kernel with a virtio-blk-pci device
+  # attached and exercises the driver end to end: data integrity (multi-sector
+  # write/read-back, flush, bounds), interrupt-mode completions over the PCI
+  # INTx line, fault injection (invalid sector, queue full, timeout -> retry ->
+  # device reset), and the IOPS/throughput/latency benchmark. Then reboots
+  # against a readonly=on drive, because VIRTIO_BLK_F_RO is only offered by a
+  # read-only device and the write-rejection path is otherwise unreachable.
+  #
+  # The job FAILS if any data-integrity check returns wrong bytes or any fault
+  # scenario does not recover — see scripts/test-blk.sh.
+  virtio-blk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            qemu-system-arm \
+            qemu-system-data \
+            ipxe-qemu \
+            mtools \
+            dosfstools
+          aarch64-linux-gnu-gcc --version | head -1
+          qemu-system-aarch64 --version | head -1
+
+      - name: Build kernel
+        run: make
+
+      - name: Build FAT32 disk image
+        run: make disk
+
+      # Integrity + IRQ completions + fault injection + benchmark, on both a
+      # writable and a read-only device.
+      - name: virtio-blk suites (integrity, IRQ, fault injection, benchmark)
+        run: ./scripts/test-blk.sh
+
+      # Regression guard for the SHARED virtqueue layer: the descriptor
+      # free-list and id-based completion path are used by blk, net, rng,
+      # console and balloon alike, so a blk change can break any of them.
+      - name: virtio device regression (blk / net / rng / console / balloon)
+        run: ./scripts/test-virtio.sh
+
+      - name: Upload virtio-blk benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blk-bench-results
+          path: bench/blk-results.txt
+          if-no-files-found: warn
+
+      - name: Upload virtio-blk serial logs (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blk-serial-logs
+          path: |
+            build/serial-blk.log
+            build/serial-blk-ro.log
+            build/serial-virtio.log
+          if-no-files-found: warn
+
   # Compile-only verification of the eBPF/XDP network monitor. Runs in parallel
   # with build-boot-bench. NOTE: this job does NOT run the XDP program — loading
   # and attaching XDP needs root (CAP_NET_ADMIN) and a real TAP interface, which
