@@ -111,9 +111,10 @@ int net_send_arp_probe(void) {
  * one used entry, copies the payload to the caller (skipping the
  * virtio_net_hdr), and re-arms the same buffer.
  *
- * Buffer ↔ descriptor mapping: virtqueue_submit allocates from free_head
- * and doesn't return the index it picked, so we shadow it with our own
- * counter and update rx_desc_to_buf[] in lockstep with each submit. */
+ * Buffer ↔ descriptor mapping: the free list hands out descriptors in
+ * whatever order they were released, so the index cannot be predicted.
+ * virtqueue_submit returns the descriptor it allocated; we key
+ * rx_desc_to_buf[] off that. */
 #define NET_RX_BUF_COUNT 8
 #define NET_RX_BUF_SIZE  1600 /* 12B hdr + 1500 MTU + slack */
 
@@ -123,9 +124,13 @@ static int     rx_desc_to_buf[VIRTQ_MAX_SIZE];
 static uint8_t rx_initialized;
 
 static void net_rx_submit_buf(int buf_idx) {
-  uint16_t desc_id = net_dev.rx_vq.free_head;
   uint64_t pa = VIRT_TO_PHYS((uint64_t)(uintptr_t)rx_bufs[buf_idx]);
-  virtqueue_submit(&net_dev.rx_vq, pa, NET_RX_BUF_SIZE, VIRTQ_DESC_F_WRITE);
+  uint16_t desc_id =
+      virtqueue_submit(&net_dev.rx_vq, pa, NET_RX_BUF_SIZE, VIRTQ_DESC_F_WRITE);
+  if (desc_id == VIRTQ_NO_DESC) {
+    uart_errorln("[NET] rx: no free descriptor, buffer not re-armed");
+    return;
+  }
   rx_desc_to_buf[desc_id] = buf_idx;
 }
 
@@ -147,16 +152,13 @@ int net_rx_poll(void *dst, uint32_t max_len) {
     return -1;
   }
 
-  uint16_t used_now = *(volatile uint16_t *)&net_dev.rx_vq.used->idx;
-  if (net_dev.rx_vq.last_used == used_now) {
+  /* Reap one completion. get_used matches by descriptor id and releases the
+   * chain back to the free list, so the buffer we re-arm below can reuse it. */
+  uint16_t desc_id   = 0;
+  uint32_t total_len = 0;
+  if (!virtqueue_get_used(&net_dev.rx_vq, &desc_id, &total_len)) {
     return 0; /* nothing pending */
   }
-  dsb_sy();
-
-  uint16_t slot      = net_dev.rx_vq.last_used % net_dev.rx_vq.size;
-  uint32_t desc_id   = net_dev.rx_vq.used->ring[slot].id;
-  uint32_t total_len = net_dev.rx_vq.used->ring[slot].len;
-  net_dev.rx_vq.last_used++;
 
   if (desc_id >= VIRTQ_MAX_SIZE || rx_desc_to_buf[desc_id] < 0) {
     uart_errorln("[NET] rx_poll: bogus / unmapped descriptor");
