@@ -270,3 +270,83 @@ void pci_enable_device(struct pci_device *dev) {
   pci_config_write16(dev->bus, dev->slot, dev->func, PCI_COMMAND, cmd);
   uart_println("[PCI] Device Enabled");
 }
+
+/* Capability list: PCI_CAP_PTR holds the offset of the first capability; each
+ * capability's byte 0 is its ID and byte 1 the offset of the next (0 = end).
+ * Offsets live in the lower 256 bytes of config space and are dword-aligned. */
+uint8_t pci_find_capability(struct pci_device *dev, uint8_t cap_id) {
+  uint16_t status = pci_config_read16(dev->bus, dev->slot, dev->func,
+                                      PCI_STATUS);
+  if (!(status & (1 << 4))) {
+    return 0; /* device has no capability list */
+  }
+
+  uint8_t ptr = pci_config_read8(dev->bus, dev->slot, dev->func, PCI_CAP_PTR)
+                & 0xFC;
+
+  /* Bounded walk: a malformed/looping list must not hang the kernel. There
+   * are at most 48 dword-aligned capability slots in the 0x40..0xFF window. */
+  for (int hops = 0; ptr >= 0x40 && hops < 48; hops++) {
+    uint8_t id = pci_config_read8(dev->bus, dev->slot, dev->func, ptr);
+    if (id == cap_id) {
+      return ptr;
+    }
+    ptr = pci_config_read8(dev->bus, dev->slot, dev->func, ptr + 1) & 0xFC;
+    if (ptr == 0) {
+      break;
+    }
+  }
+  return 0;
+}
+
+void pci_dump_capabilities(struct pci_device *dev) {
+  uint16_t status = pci_config_read16(dev->bus, dev->slot, dev->func,
+                                      PCI_STATUS);
+  if (!(status & (1 << 4))) {
+    uart_println("[PCI] device advertises no capability list");
+    return;
+  }
+
+  uint8_t ptr = pci_config_read8(dev->bus, dev->slot, dev->func, PCI_CAP_PTR)
+                & 0xFC;
+
+  for (int hops = 0; ptr >= 0x40 && hops < 48; hops++) {
+    uint8_t id = pci_config_read8(dev->bus, dev->slot, dev->func, ptr);
+    const char *name = "other";
+    if (id == PCI_CAP_ID_MSIX) {
+      name = "MSI-X";
+    } else if (id == PCI_CAP_ID_MSI) {
+      name = "MSI";
+    } else if (id == PCI_CAP_ID_VENDOR) {
+      name = "vendor (virtio)";
+    }
+    uart_printf("[PCI]   cap id=%x @ %x  (%s)\n", (uint32_t)id, (uint32_t)ptr,
+                name);
+
+    ptr = pci_config_read8(dev->bus, dev->slot, dev->func, ptr + 1) & 0xFC;
+    if (ptr == 0) {
+      break;
+    }
+  }
+}
+
+void pci_enable_intx(struct pci_device *dev) {
+  uint16_t cmd = pci_config_read16(dev->bus, dev->slot, dev->func, PCI_COMMAND);
+  cmd &= (uint16_t)~PCI_CMD_INTX_DISABLE;
+  pci_config_write16(dev->bus, dev->slot, dev->func, PCI_COMMAND, cmd);
+}
+
+uint32_t pci_intx_intid(struct pci_device *dev) {
+  uint8_t pin = pci_config_read8(dev->bus, dev->slot, dev->func,
+                                 PCI_INTERRUPT_PIN);
+  if (pin == 0 || pin > 4) {
+    return 0; /* device uses no legacy interrupt pin */
+  }
+
+  /* QEMU virt's DT interrupt-map: interrupt-map-mask is 0x1800 on the device
+   * number, i.e. only the low 2 bits of the slot select a row, and the pin is
+   * swizzled in. The four rows resolve to SPIs 3..6. We recompute that here
+   * rather than parsing the DT, because the kernel has no DT parser. */
+  uint32_t spi = 3 + (((uint32_t)dev->slot + (uint32_t)pin - 1) % 4);
+  return 32 + spi; /* SPI n == INTID 32 + n */
+}

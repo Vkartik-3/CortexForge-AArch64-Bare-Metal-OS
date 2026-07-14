@@ -1,5 +1,6 @@
 #include "gic.h"
 #include "mmio/mmio.h"
+#include "pci/virtio/blk/blk.h"
 #include "uart/uart.h"
 #include "strings/strings.h"
 
@@ -59,6 +60,16 @@ void gic_init() {
   return;
 }
 
+void gic_disable_irq(uint32_t intid) {
+  if (intid < 32) {
+    mmio_write32(GICR_ICENABLER0, (1U << intid));
+  } else {
+    uint32_t reg = GICD_ICENABLER + (intid / 32) * 4;
+    mmio_write32(reg, (1U << (intid % 32)));
+  }
+  uart_printf("[GIC] Disabled IRQ %d\n", (uint64_t)intid);
+}
+
 void gic_enable_irq(uint32_t intid) {
   if (intid < 32) {
     // SGI/PPI: Redistributor ISENABLER0
@@ -114,6 +125,9 @@ static const char *gic_intid_source(uint32_t intid) {
   if (intid == 30)  return "timer (PPI)";
   if (intid < 16)   return "SGI";
   if (intid < 32)   return "PPI";
+  /* PCI INTx on the QEMU virt machine lands on SPIs 3..6 (INTID 35..38). The
+   * blk device's actual line is reported by blk_get_irq() at init. */
+  if (intid == blk_get_irq()) return "virtio-blk (PCI INTx)";
   return "SPI";
 }
 

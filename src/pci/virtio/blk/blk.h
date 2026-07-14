@@ -42,6 +42,32 @@
 #define VIRTIO_BLK_DEFAULT_SEG_MAX 3
 #define VIRTIO_BLK_DEFAULT_SIZE_MAX 0xFFFFFFFFu
 
+/*
+ * Return codes. This tree's convention is inverted from POSIX (ESUCCESS == 1,
+ * EERROR == 0), and every existing caller tests `!= ESUCCESS`. Success keeps
+ * returning ESUCCESS so those callers are unaffected; failures return distinct
+ * NEGATIVE codes, which are also `!= ESUCCESS` and so remain compatible while
+ * telling the caller what actually went wrong.
+ */
+#define BLK_ETIMEDOUT (-1) /* device never completed, retries exhausted    */
+#define BLK_EIO (-2)       /* device returned a non-OK status byte         */
+#define BLK_ERANGE (-3)    /* sector range outside device capacity         */
+#define BLK_EROFS (-4)     /* write to a VIRTIO_BLK_F_RO device            */
+#define BLK_ENOSPC (-5)    /* virtqueue full — no descriptors available    */
+#define BLK_ENODEV (-6)    /* device absent or not initialized             */
+#define BLK_EINVAL (-7)    /* bad arguments                                */
+#define BLK_EUNSUPP (-8)   /* operation not negotiated (e.g. flush)        */
+
+/* Completion mode. Polling is the default: it preserves the pre-existing
+ * behaviour and is what the FAT32 mount path uses during early boot, before
+ * interrupts are usable. */
+#define BLK_MODE_POLL 0
+#define BLK_MODE_IRQ 1
+
+/* Defaults for the timeout / retry policy (Phase 4). */
+#define BLK_DEFAULT_TIMEOUT_SPINS 10000000u
+#define BLK_DEFAULT_RETRIES 3
+
 struct virtio_blk {
   struct pci_device pci;
   struct virtio_pci_caps pci_caps;
@@ -55,6 +81,26 @@ struct virtio_blk {
   uint8_t read_only; /* VIRTIO_BLK_F_RO negotiated */
   uint8_t has_flush; /* VIRTIO_BLK_F_FLUSH negotiated */
   uint8_t initialized;
+
+  /* Completion mode + interrupt state */
+  uint8_t mode;      /* BLK_MODE_POLL | BLK_MODE_IRQ */
+  uint32_t irq;      /* GIC INTID for this device's INTx line (0 = none) */
+  uint8_t irq_ready; /* IRQ registered with the GIC                      */
+
+  /* Bumped by the IRQ handler for every completion it reaps. The request path
+   * waits for this to move. Volatile: written from the exception handler and
+   * read from the requesting context. */
+  volatile uint32_t completions;
+
+  /* Timeout / retry policy */
+  uint32_t timeout_spins;
+  uint32_t retries;
+
+  /* Diagnostics, surfaced by the fault-injection suite. */
+  uint64_t stat_timeouts;
+  uint64_t stat_retries;
+  uint64_t stat_resets;
+  uint64_t stat_irqs;
 };
 
 /* On-the-wire request header. The data payload and the status byte are
@@ -85,8 +131,44 @@ int blk_read(uint64_t sector, void *buf, uint32_t count);
 int blk_write(uint64_t sector, const void *buf, uint32_t count);
 
 /* blk_flush — commit volatile device writes to stable storage. ESUCCESS on
- * completion; EERROR on failure/timeout, or if the device did not negotiate
- * VIRTIO_BLK_F_FLUSH. */
+ * completion; a negative BLK_E* code on failure/timeout, or BLK_EUNSUPP if the
+ * device did not negotiate VIRTIO_BLK_F_FLUSH. */
 int blk_flush(void);
+
+/* ---- completion mode ---------------------------------------------------- */
+
+/* Select polling or interrupt completions. Returns the previous mode.
+ * Requesting BLK_MODE_IRQ when no interrupt could be wired up leaves the
+ * driver in polling mode and returns the unchanged mode. */
+int blk_set_mode(int mode);
+int blk_get_mode(void);
+
+/* Convenience wrappers: run one operation in the given mode and restore the
+ * previous mode afterwards. */
+int blk_read_irq(uint64_t sector, void *buf, uint32_t count);
+int blk_write_irq(uint64_t sector, const void *buf, uint32_t count);
+int blk_flush_irq(void);
+
+/* GIC INTID this device's INTx line is wired to (0 if none). */
+uint32_t blk_get_irq(void);
+
+/* Called from the IRQ dispatch path in exception.c when blk_get_irq() fires.
+ * Acknowledges the device's ISR and reaps every pending used-ring entry. */
+void blk_handle_irq(void);
+
+/* ---- timeout / retry policy --------------------------------------------- */
+
+/* Busy-wait budget for one attempt, in spin iterations. 0 restores the
+ * default. Returns the previous value. */
+uint32_t blk_set_timeout(uint32_t spins);
+
+/* Attempts per request before it is failed with BLK_ETIMEDOUT. A value of 1
+ * means no retry. Returns the previous value. */
+uint32_t blk_set_retries(uint32_t retries);
+
+/* Full device reset: RESET -> re-negotiate features -> re-create the
+ * virtqueue -> DRIVER_OK. Used to recover a wedged device, and the only way to
+ * resynchronise the used ring after a request times out. */
+int blk_reset_device(void);
 
 #endif

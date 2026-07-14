@@ -7,4 +7,12 @@
  * Prints [BLKTEST] lines; ends with "[BLKTEST] ALL PASS" on success. */
 void blk_selftest(void);
 
+/* Interrupt-mode test: 10 reads completed via the device's INTx line, with
+ * verification that the interrupt actually fired and the data is correct. */
+void blk_irqtest(void);
+
+/* Fault-injection suite: invalid sector, read-only violation, queue full,
+ * timeout/retry/device-reset, and recovery after each. Prints [FAULT] lines. */
+void blk_faulttest(void);
+
 #endif

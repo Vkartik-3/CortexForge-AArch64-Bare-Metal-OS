@@ -11,6 +11,7 @@
 #include "mm/pmm/pmm.h"
 #include "strings/strings.h"
 #include "bench/bench.h"
+#include "pci/virtio/blk/blk_bench.h"
 #include "pci/virtio/blk/blk_test.h"
 #include "signal.h"
 #include "sched/rtos.h"
@@ -529,9 +530,22 @@ void syscall_dispatch(trap_frame_t *frame) {
     break;
 
   case SYS_BLKTEST:
-    /* Run the virtio-blk data-integrity self-test at EL1 (the driver and its
-     * DMA buffers are kernel-only). Prints [BLKTEST] lines and returns 0. */
-    blk_selftest();
+    /* virtio-blk suites, all at EL1 (the driver and its DMA buffers are
+     * kernel-only). arg0 selects which: 0=integrity, 1=irq, 2=fault, 3=bench. */
+    switch (arg0) {
+    case 1:
+      blk_irqtest();
+      break;
+    case 2:
+      blk_faulttest();
+      break;
+    case 3:
+      blk_bench_run();
+      break;
+    default:
+      blk_selftest();
+      break;
+    }
     ret = 0;
     break;
 

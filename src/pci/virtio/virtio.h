@@ -36,6 +36,13 @@
 #define VIRTIO_COMMON_Q_DEVICELO 0x30 /* u32 rw  used ring addr (low) */
 #define VIRTIO_COMMON_Q_DEVICEHI 0x34 /* u32 rw  used ring addr (high) */
 
+/* ISR status register (virtio 1.2 §4.1.4.5). One byte, in the ISR cfg BAR
+ * region. Reading it returns the pending-interrupt bits AND clears them —
+ * which is also how a legacy INTx line is de-asserted, so the handler must
+ * read it exactly once per interrupt. */
+#define VIRTIO_ISR_QUEUE 0x1  /* a virtqueue produced a used buffer */
+#define VIRTIO_ISR_CONFIG 0x2 /* device configuration changed       */
+
 struct virtio_pci_caps {
   uintptr_t common_cfg;  // cfg type 1
   uintptr_t notify_base; // cfg type 2

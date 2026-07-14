@@ -8,6 +8,7 @@
 
 #define GICD_CTLR (GICD_BASE + 0x0000)
 #define GICD_ISENABLER (GICD_BASE + 0x0100)
+#define GICD_ICENABLER (GICD_BASE + 0x0180) /* write-1-to-clear enable */
 #define GICD_IGROUPR (GICD_BASE + 0x0080)   /* 1 bit/INTID: 1 = Group 1     */
 #define GICD_IGRPMODR (GICD_BASE + 0x0D00)  /* 1 bit/INTID: 0 = Non-secure  */
 #define GICD_IROUTER (GICD_BASE + 0x6000)   /* 64 bits/INTID (SPIs, ARE on) */
@@ -20,6 +21,7 @@
 #define GICR_IGROUPR0 (GICR_SGI_BASE + 0x0080)
 #define GICR_IGRPMODR0 (GICR_SGI_BASE + 0x0D00)
 #define GICR_ISENABLER0 (GICR_SGI_BASE + 0x0100)
+#define GICR_ICENABLER0 (GICR_SGI_BASE + 0x0180)
 #define GICR_WAKER_PROCESSOR_SLEEP (1U << 1)
 #define GICR_WAKER_CHILDREN_ASLEEP (1U << 2)
 
@@ -27,6 +29,11 @@
 
 void gic_init(void);
 void gic_enable_irq(uint32_t intid);
+
+/* Mask an INTID at the GIC. ICENABLER is write-1-to-clear: writing a 1 to a
+ * bit disables that interrupt and writing 0 has no effect, so this is a plain
+ * write of the single bit, NOT a read-modify-write. */
+void gic_disable_irq(uint32_t intid);
 uint64_t gic_ack_irq(void);
 void gic_end_irq(uint64_t intid);
 

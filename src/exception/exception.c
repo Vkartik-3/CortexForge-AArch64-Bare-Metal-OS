@@ -3,6 +3,7 @@
 #include "signal.h"
 #include "uart/framing.h"
 #include "gic/gic.h"
+#include "pci/virtio/blk/blk.h"
 #include "mm/mmu/mmu.h"
 #include "panic/panic.h"
 #include "sched/sched.h"
@@ -262,6 +263,10 @@ void exception_dispatch(uint64_t type, trap_frame_t *frame) {
       timer_handle_irq();
     } else if (intid == UART1_INTID) {
       uart1_rx_isr();
+    } else if (blk_get_irq() != 0 && intid == blk_get_irq()) {
+      /* virtio-blk INTx: the handler reads the device's ISR (which also
+       * de-asserts the line) and reaps every pending used-ring entry. */
+      blk_handle_irq();
     } else {
       uart_printf("[IRQ] INTID %d (not implemented)\n", (uint64_t)intid);
     }

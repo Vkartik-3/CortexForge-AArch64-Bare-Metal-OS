@@ -170,11 +170,11 @@ static inline int64_t sys_bench(void) {
   return x0;
 }
 
-static inline int64_t sys_blktest(void) {
-  register int64_t x0 __asm__("x0");
+static inline int64_t sys_blktest(uint64_t which) {
+  register uint64_t x0 __asm__("x0") = which;
   register uint64_t x8 __asm__("x8") = 22; /* SYS_BLKTEST */
-  __asm__ __volatile__("svc #0" : "=r"(x0) : "r"(x8) : "memory");
-  return x0;
+  __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x8) : "memory");
+  return (int64_t)x0;
 }
 
 static inline int64_t sys_rt(uint64_t op) {
@@ -276,6 +276,9 @@ static void sh_help(void) {
       "  stack           - stress test demand-paged user stack growth\n"
       "  bench           - PMU cycle-level latency benchmarks (syscall/ctxsw/irq)\n"
       "  blktest         - virtio-blk data-integrity self-test (multi-sector, flush)\n"
+      "  blkirq          - virtio-blk interrupt-mode completion test\n"
+      "  blkfault        - virtio-blk fault injection (timeout/retry/reset)\n"
+      "  blkbench        - virtio-blk IOPS/throughput/latency benchmark\n"
       "  rtdemo          - spawn periodic real-time tasks (rt_hi/rt_mid/rt_lo)\n"
       "  rt              - show real-time scheduling stats (WCRT / deadline misses)\n"
       "  pidemo          - priority-inversion demo (shows priority inheritance)\n"
@@ -618,9 +621,15 @@ static void task_shell(void) {
        * SYS_BENCH; all [BENCH] output is printed from EL1. */
       sys_bench();
     } else if (u_streq(line, "blktest")) {
-      /* virtio-blk data-integrity self-test. Runs at EL1 via SYS_BLKTEST:
-       * the block driver and its DMA buffers are kernel-only. */
-      sys_blktest();
+      /* virtio-blk suites. All run at EL1 via SYS_BLKTEST: the block driver
+       * and its DMA buffers are kernel-only. */
+      sys_blktest(0); /* data integrity */
+    } else if (u_streq(line, "blkirq")) {
+      sys_blktest(1); /* interrupt-mode completions */
+    } else if (u_streq(line, "blkfault")) {
+      sys_blktest(2); /* fault injection */
+    } else if (u_streq(line, "blkbench")) {
+      sys_blktest(3); /* IOPS / throughput / latency */
     } else if (u_streq(line, "rtdemo")) {
       sys_rt(0); /* spawn periodic RT demo tasks */
     } else if (u_streq(line, "rt")) {
